@@ -1,0 +1,124 @@
+:root {
+  /* === Пастельная палитра === */
+
+  /* Основной акцент — мягкий синий (достаточно контрастный для кнопок) */
+  --color-primary: #5B8DB8;
+  --color-primary-hover: #4A7DA8;
+  --color-primary-active: #3D6E96;
+  --color-primary-light: #E8F0F8;
+  --color-primary-text: #FFFFFF;
+
+  /* Успех — мятный */
+  --color-success: #7BC89C;
+  --color-success-hover: #68B889;
+  --color-success-light: #E8F8EF;
+
+  /* Предупреждение — песочный */
+  --color-warning: #E8C87B;
+  --color-warning-hover: #D9B866;
+  --color-warning-light: #FFF8E8;
+
+  /* Ошибка / опасность — пыльная роза */
+  --color-danger: #CF8B8B;
+  --color-danger-hover: #BF7A7A;
+  --color-danger-light: #F8E8E8;
+
+  /* Информация — лавандовый */
+  --color-info: #A3A0D4;
+  --color-info-light: #EDEDF8;
+
+  /* === Фоны === */
+  --color-bg: #F5F3F0;
+  --color-bg-secondary: #EDEAE6;
+  --color-surface: #FFFFFF;
+  --color-surface-hover: #FAFAF8;
+  --color-surface-active: #F5F3F0;
+
+  /* === Границы === */
+  --color-border: #E5E2DE;
+  --color-border-light: #F0EDEA;
+  --color-border-focus: #7C9CBF;
+
+  /* === Текст === */
+  --color-text: #2D3142;
+  --color-text-secondary: #6B6D7B;
+  --color-text-muted: #A5A3AB;
+  --color-text-inverse: #FFFFFF;
+
+  /* === Статусы тикетов (пастельные) === */
+  --color-status-open: #7BC89C;
+  --color-status-open-bg: #E8F8EF;
+  --color-status-in-progress: #7C9CBF;
+  --color-status-in-progress-bg: #E8F0F8;
+  --color-status-waiting: #E8C87B;
+  --color-status-waiting-bg: #FFF8E8;
+  --color-status-resolved: #A3A0D4;
+  --color-status-resolved-bg: #EDEDF8;
+  --color-status-closed: #A5A3AB;
+  --color-status-closed-bg: #F0F0F0;
+
+  /* === Приоритеты === */
+  --color-priority-low: #A5A3AB;
+  --color-priority-medium: #7C9CBF;
+  --color-priority-high: #E8C87B;
+  --color-priority-critical: #CF8B8B;
+
+  /* === Отступы === */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+  --space-3xl: 64px;
+
+  /* === Шрифт === */
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-size-xs: 0.75rem;    /* 12px */
+  --font-size-sm: 0.8125rem;  /* 13px */
+  --font-size-base: 0.9375rem;/* 15px */
+  --font-size-lg: 1.0625rem;  /* 17px */
+  --font-size-xl: 1.3125rem;  /* 21px */
+  --font-size-2xl: 1.625rem;  /* 26px */
+  --font-size-3xl: 2rem;      /* 32px */
+
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  --line-height: 1.5;
+  --line-height-tight: 1.25;
+
+  /* === Радиусы (мягкие) === */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  /* === Тени (лёгкие) === */
+  --shadow-xs: 0 1px 2px rgba(45, 49, 66, 0.04);
+  --shadow-sm: 0 2px 6px rgba(45, 49, 66, 0.06);
+  --shadow-md: 0 4px 14px rgba(45, 49, 66, 0.08);
+  --shadow-lg: 0 8px 28px rgba(45, 49, 66, 0.10);
+  --shadow-xl: 0 16px 48px rgba(45, 49, 66, 0.12);
+
+  /* === Переходы === */
+  --transition-fast: 0.15s ease;
+  --transition: 0.2s ease;
+  --transition-slow: 0.3s ease;
+
+  /* === Z-index === */
+  --z-dropdown: 100;
+  --z-modal-backdrop: 200;
+  --z-modal: 201;
+  --z-toast: 300;
+  --z-drawer: 150;
+
+  /* === Layout === */
+  --header-height: 60px;
+  --sidebar-width: 260px;
+  --max-content-width: 1200px;
+}

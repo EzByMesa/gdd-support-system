@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # PostgreSQL (опционально — можно использовать SQLite)
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: gdd_support
+      POSTGRES_USER: gdd
+      POSTGRES_PASSWORD: gdd_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gdd"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Backend API
+  backend:
+    build: ./backend
+    environment:
+      PORT: 3000
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      NODE_ENV: production
+      # Для PostgreSQL:
+      # DATABASE_URL: postgres://gdd:gdd_password@postgres:5432/gdd_support
+      # DB_DIALECT: postgres
+      # Для SQLite (по умолчанию):
+      # DATABASE_URL и DB_DIALECT задаются через Setup Wizard
+    volumes:
+      - attachments:/app/attachments
+      - backend_data:/app/data
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Frontend (Nginx + SPA)
+  frontend:
+    build: ./frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  attachments:
+  backend_data:

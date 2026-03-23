@@ -1,0 +1,122 @@
+/* ==========================================
+   Адаптивность (Mobile-first)
+   ========================================== */
+
+/* --- Мобильный (по умолчанию, < 768px) --- */
+
+.header__username { display: none; }
+.header__burger { display: flex; }
+.admin-sidebar { display: none; }
+
+.admin-content {
+  padding: var(--space-md);
+  max-width: 100%;
+}
+
+.main-content {
+  padding: var(--space-md);
+}
+
+.ticket-detail {
+  grid-template-columns: 1fr;
+}
+
+.ticket-detail__sidebar {
+  order: -1;
+}
+
+.chat {
+  height: calc(100vh - var(--header-height) - 120px);
+  border-radius: 0;
+}
+
+.stepper__label { display: none; }
+
+.stats-grid {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+/* Таблица → скрыть на мобильных, показать карточки */
+.table-wrapper { display: none; }
+.card-list { display: flex; flex-direction: column; gap: var(--space-sm); }
+
+.setup-card { padding: var(--space-lg); }
+.auth-card { padding: var(--space-lg); }
+
+.modal {
+  width: 95%;
+  max-height: 85vh;
+}
+
+#toast-container {
+  left: var(--space-md);
+  right: var(--space-md);
+}
+
+.toast {
+  min-width: auto;
+  max-width: 100%;
+}
+
+/* --- Планшет (>= 768px) --- */
+
+@media (min-width: 768px) {
+  .header__username { display: block; }
+  .header__burger { display: none; }
+
+  .admin-sidebar { display: flex; }
+
+  .admin-content {
+    padding: var(--space-lg);
+  }
+
+  .main-content {
+    padding: var(--space-lg);
+  }
+
+  .ticket-detail {
+    grid-template-columns: 1fr 280px;
+  }
+
+  .ticket-detail__sidebar {
+    order: 0;
+  }
+
+  .chat {
+    height: 500px;
+    border-radius: var(--radius-lg);
+  }
+
+  .stepper__label { display: block; }
+
+  .stats-grid {
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  }
+
+  .table-wrapper { display: block; }
+  .card-list { display: none; }
+
+  .modal {
+    width: 90%;
+  }
+}
+
+/* --- Десктоп (>= 1024px) --- */
+
+@media (min-width: 1024px) {
+  .ticket-detail {
+    grid-template-columns: 1fr 320px;
+  }
+
+  .admin-content {
+    max-width: calc(var(--max-content-width) - var(--sidebar-width));
+  }
+}
+
+/* --- Широкий десктоп (>= 1280px) --- */
+
+@media (min-width: 1280px) {
+  .main-content {
+    max-width: var(--max-content-width);
+  }
+}

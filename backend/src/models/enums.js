@@ -1,0 +1,41 @@
+export const Role = {
+  ADMIN: 'ADMIN',
+  AGENT: 'AGENT',
+  USER: 'USER'
+};
+
+export const TicketStatus = {
+  OPEN: 'OPEN',
+  IN_PROGRESS: 'IN_PROGRESS',
+  WAITING_FOR_USER: 'WAITING_FOR_USER',
+  RESOLVED: 'RESOLVED',
+  CLOSED: 'CLOSED'
+};
+
+export const TicketPriority = {
+  LOW: 'LOW',
+  MEDIUM: 'MEDIUM',
+  HIGH: 'HIGH',
+  CRITICAL: 'CRITICAL'
+};
+
+export const AuthProviderType = {
+  LOCAL: 'LOCAL',
+  ONE_C: 'ONE_C'
+};
+
+export const DelegationStatus = {
+  PENDING: 'PENDING',
+  ACCEPTED: 'ACCEPTED',
+  REJECTED: 'REJECTED'
+};
+
+export const NotificationType = {
+  NEW_MESSAGE: 'NEW_MESSAGE',
+  STATUS_CHANGED: 'STATUS_CHANGED',
+  TICKET_ASSIGNED: 'TICKET_ASSIGNED',
+  DELEGATION_REQUEST: 'DELEGATION_REQUEST',
+  DELEGATION_ACCEPTED: 'DELEGATION_ACCEPTED',
+  DELEGATION_REJECTED: 'DELEGATION_REJECTED',
+  AGENT_CHANGED: 'AGENT_CHANGED'
+};
