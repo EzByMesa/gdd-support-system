@@ -1,25 +1,32 @@
 /**
  * HTTP-клиент — обёртка над fetch.
- * Автоматическое добавление JWT, обработка ошибок, refresh token.
+ * Access token сохраняется в sessionStorage для переживания F5.
+ * Refresh token в httpOnly cookie — автоматически обновляется.
  */
-export class ApiService {
+const TOKEN_KEY = 'gdd_access_token';
+
+class ApiService {
   constructor(baseUrl = '/api') {
     this.baseUrl = baseUrl;
-    this.accessToken = null;
-    this.onUnauthorized = null; // callback при протухшей сессии
+    this.accessToken = sessionStorage.getItem(TOKEN_KEY) || null;
+    this.onUnauthorized = null;
+    this._refreshPromise = null;
   }
 
   setToken(token) {
     this.accessToken = token;
+    if (token) {
+      sessionStorage.setItem(TOKEN_KEY, token);
+    } else {
+      sessionStorage.removeItem(TOKEN_KEY);
+    }
   }
 
   clearToken() {
     this.accessToken = null;
+    sessionStorage.removeItem(TOKEN_KEY);
   }
 
-  /**
-   * Основной метод запроса
-   */
   async request(method, path, { body, query, headers = {} } = {}) {
     let url = `${this.baseUrl}${path}`;
 
@@ -36,10 +43,8 @@ export class ApiService {
 
     const opts = {
       method,
-      headers: {
-        ...headers
-      },
-      credentials: 'include' // для refresh token cookie
+      headers: { ...headers },
+      credentials: 'include'
     };
 
     if (this.accessToken) {
@@ -55,7 +60,7 @@ export class ApiService {
 
     let response = await fetch(url, opts);
 
-    // Если токен протух — пробуем обновить
+    // На 401 пробуем обновить токен один раз
     if (response.status === 401) {
       const refreshed = await this._tryRefresh();
       if (refreshed) {
@@ -74,6 +79,7 @@ export class ApiService {
 
     if (!response.ok) {
       if (response.status === 401 && this.onUnauthorized) {
+        this.clearToken();
         this.onUnauthorized();
       }
 
@@ -88,29 +94,39 @@ export class ApiService {
   }
 
   async _tryRefresh() {
-    try {
-      const res = await fetch(`${this.baseUrl}/auth/refresh`, {
-        method: 'POST',
-        credentials: 'include'
-      });
+    // Дедупликация: если уже идёт refresh, ждём его
+    if (this._refreshPromise) return this._refreshPromise;
 
-      if (!res.ok) return false;
+    this._refreshPromise = (async () => {
+      try {
+        const res = await fetch(`${this.baseUrl}/auth/refresh`, {
+          method: 'POST',
+          credentials: 'include'
+        });
 
-      const data = await res.json();
-      if (data.accessToken) {
-        this.accessToken = data.accessToken;
-        return true;
+        if (!res.ok) return false;
+
+        const data = await res.json();
+        if (data.accessToken) {
+          this.setToken(data.accessToken);
+          return true;
+        }
+      } catch {
+        // refresh не удался
       }
-    } catch {
-      // refresh не удался
-    }
-    return false;
+      return false;
+    })();
+
+    const result = await this._refreshPromise;
+    this._refreshPromise = null;
+    return result;
   }
 
-  // Shorthand-методы
   get(path, query) { return this.request('GET', path, { query }); }
   post(path, body) { return this.request('POST', path, { body }); }
   put(path, body) { return this.request('PUT', path, { body }); }
   delete(path) { return this.request('DELETE', path); }
   upload(path, formData) { return this.request('POST', path, { body: formData }); }
 }
+
+export const api = new ApiService();

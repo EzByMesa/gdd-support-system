@@ -1,10 +1,25 @@
 import 'dotenv/config';
 
-// JWT_SECRET обязателен — генерируем дефолтный для dev если не задан
+// JWT_SECRET обязателен — генерируем и сохраняем в .env если не задан
 if (!process.env.JWT_SECRET) {
   const { randomBytes } = await import('crypto');
-  process.env.JWT_SECRET = randomBytes(32).toString('hex');
-  console.log('[Auth] JWT_SECRET не задан — сгенерирован автоматически (dev-режим)');
+  const { appendFileSync, existsSync, readFileSync } = await import('fs');
+  const { resolve } = await import('path');
+
+  const secret = randomBytes(32).toString('hex');
+  process.env.JWT_SECRET = secret;
+
+  // Сохраняем в .env, чтобы секрет не менялся при рестарте
+  const envPath = resolve(process.cwd(), '.env');
+  try {
+    const envContent = existsSync(envPath) ? readFileSync(envPath, 'utf-8') : '';
+    if (!envContent.includes('JWT_SECRET=')) {
+      appendFileSync(envPath, `${envContent && !envContent.endsWith('\n') ? '\n' : ''}JWT_SECRET=${secret}\n`);
+      console.log('[Auth] JWT_SECRET сгенерирован и сохранён в .env');
+    }
+  } catch {
+    console.log('[Auth] JWT_SECRET сгенерирован (не удалось сохранить в .env)');
+  }
 }
 
 import express from 'express';
@@ -21,18 +36,23 @@ import delegationRoutes from './routes/delegationRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import topicGroupRoutes from './routes/topicGroupRoutes.js';
 import notificationRoutes, { pushRouter } from './routes/notificationRoutes.js';
+import profileRoutes from './routes/profileRoutes.js';
 import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './docs/swagger.js';
 import { authenticate, requireAdmin } from './middleware/auth.js';
 import { initWebSocket } from './websocket/wsServer.js';
 import { initVapid } from './services/notification.js';
+import { initSmtp } from './services/email.js';
 
 const app = express();
 const server = createServer(app);
 
 // --- Middleware ---
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: process.env.FRONTEND_URL || [
+    'http://localhost:5173', 'http://127.0.0.1:5173',
+    'https://localhost:5173', 'https://127.0.0.1:5173'
+  ],
   credentials: true
 }));
 app.use(express.json());
@@ -56,6 +76,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/topic-groups', topicGroupRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/push', pushRouter);
+app.use('/api/profile', profileRoutes);
 
 // Swagger — доступ через cookie (для админки, read-only)
 import jwt from 'jsonwebtoken';
@@ -104,8 +125,40 @@ async function start() {
       const { sequelize } = initDatabase(process.env.DATABASE_URL, { dialect });
       await sequelize.authenticate();
       console.log(`[DB] Подключение к ${dialect === 'sqlite' ? 'SQLite' : 'PostgreSQL'} установлено`);
+      // Обновляем схему БД
+      if (dialect === 'sqlite') {
+        // SQLite не поддерживает ALTER TABLE нормально — добавляем колонки вручную
+        await sequelize.query('PRAGMA foreign_keys = OFF;');
+        const safeAddColumn = async (table, col, type, dflt) => {
+          try {
+            const def = dflt !== undefined ? ` DEFAULT ${dflt}` : '';
+            await sequelize.query(`ALTER TABLE "${table}" ADD COLUMN "${col}" ${type}${def};`);
+            console.log(`[DB] Добавлена колонка ${table}.${col}`);
+          } catch { /* уже существует */ }
+        };
+        await safeAddColumn('tickets', 'closedReason', 'TEXT');
+        await safeAddColumn('tickets', 'customFields', 'TEXT');
+        await safeAddColumn('users', 'verifiedEmail', 'VARCHAR(255)');
+
+        // Починка: сломанный unique index на agent_aliases (agentId вместо agentId+ticketId)
+        try {
+          // Удаляем неправильный индекс и создаём правильный composite
+          await sequelize.query('DROP INDEX IF EXISTS "agent_aliases_agent_id_ticket_id"');
+          await sequelize.query('DROP INDEX IF EXISTS "agent_aliases_agentId_ticketId"');
+          await sequelize.query('CREATE UNIQUE INDEX IF NOT EXISTS "agent_aliases_agent_id_ticket_id" ON "agent_aliases" ("agentId", "ticketId")');
+          console.log('[DB] Индекс agent_aliases исправлен');
+        } catch (e) { console.warn('[DB] Индекс agent_aliases:', e.message); }
+
+        // Создаём новые таблицы (если не существуют)
+        await sequelize.sync();
+        await sequelize.query('PRAGMA foreign_keys = ON;');
+      } else {
+        // PostgreSQL нормально поддерживает ALTER
+        await sequelize.sync({ alter: true });
+      }
       await checkSetupState();
       await initVapid();
+      await initSmtp();
     } else {
       console.log('[DB] DATABASE_URL не задан — ожидаем настройку через Setup Wizard');
     }
@@ -113,11 +166,11 @@ async function start() {
     // WebSocket
     initWebSocket(server);
 
-    server.listen(PORT, () => {
-      console.log(`[Server] GDD Support System запущен на порту ${PORT}`);
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log(`[Server] GDD Support System запущен на http://127.0.0.1:${PORT}`);
     });
   } catch (err) {
-    console.error('[Server] Ошибка запуска:', err.message);
+    console.error('[Server] Ошибка запуска:', err.message, err.errors || '', err.stack);
     process.exit(1);
   }
 }

@@ -146,6 +146,14 @@ export function sendToUser(userId, message) {
 }
 
 /**
+ * Проверить, онлайн ли пользователь (есть ли активные WS-соединения)
+ */
+export function isUserOnline(userId) {
+  const channel = userChannels.get(userId);
+  return !!(channel && channel.size > 0);
+}
+
+/**
  * Получить информацию о комнате
  */
 export function getRoomInfo(ticketId) {

@@ -48,6 +48,15 @@ export async function handleChatMessage(ws, ticketId, user, msg) {
     return;
   }
 
+  // Закрытый/решённый тикет — только чтение
+  if (ticket.status === TicketStatus.CLOSED || ticket.status === TicketStatus.RESOLVED) {
+    ws.send(JSON.stringify({
+      type: 'error',
+      data: { code: 'TICKET_CLOSED', message: 'Обращение закрыто. Чат доступен только для чтения.' }
+    }));
+    return;
+  }
+
   // Проверяем права: USER — только свой, AGENT — только назначенный на себя, ADMIN — любой
   if (user.role === Role.USER && ticket.authorId !== user.sub) return;
   if (user.role === Role.AGENT && ticket.assigneeId !== user.sub) return;
@@ -164,6 +173,7 @@ export async function handleChatMessage(ws, ticketId, user, msg) {
  * Обработать индикатор набора
  */
 export async function handleTyping(ws, ticketId, user) {
+  try {
   const isAgent = user.role === Role.AGENT || user.role === Role.ADMIN;
 
   if (isAgent) {
@@ -179,6 +189,9 @@ export async function handleTyping(ws, ticketId, user) {
       { type: 'typing', data: { displayName: user.login, userId: user.sub } },
       ws
     );
+  }
+  } catch (err) {
+    console.error('[WS] Ошибка handleTyping:', err.message);
   }
 }
 

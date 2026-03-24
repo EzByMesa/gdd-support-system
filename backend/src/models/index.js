@@ -11,6 +11,9 @@ import NotificationModel from './Notification.js';
 import AuthProviderModel from './AuthProvider.js';
 import SystemSettingsModel from './SystemSettings.js';
 import SetupStateModel from './SetupState.js';
+import CustomFieldModel from './CustomField.js';
+import NotificationPreferenceModel from './NotificationPreference.js';
+import EmailVerificationModel from './EmailVerification.js';
 
 let sequelize = null;
 let models = {};
@@ -57,7 +60,10 @@ export function initDatabase(connectionString, opts = {}) {
     Notification: NotificationModel(sequelize),
     AuthProvider: AuthProviderModel(sequelize),
     SystemSettings: SystemSettingsModel(sequelize),
-    SetupState: SetupStateModel(sequelize)
+    SetupState: SetupStateModel(sequelize),
+    CustomField: CustomFieldModel(sequelize),
+    NotificationPreference: NotificationPreferenceModel(sequelize),
+    EmailVerification: EmailVerificationModel(sequelize)
   };
 
   // Установить связи

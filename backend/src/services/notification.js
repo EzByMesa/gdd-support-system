@@ -1,10 +1,17 @@
 /**
  * Сервис уведомлений.
- * 3 канала: БД (всегда) + Web Push (если подписан) + WebSocket (если онлайн).
+ * Каналы: В приложении (всегда) + Push (если подписан) + Email (если настроен)
+ *
+ * УМНАЯ МАРШРУТИЗАЦИЯ:
+ * Если пользователь ОНЛАЙН (есть активное WS-соединение),
+ * уведомление отправляется ТОЛЬКО в приложение (WS + БД).
+ * Push и Email отправляются только если пользователь ОФФЛАЙН
+ * и канал включён в его настройках.
  */
 import webpush from 'web-push';
 import { getModels } from '../models/index.js';
-import { sendToUser } from '../websocket/wsServer.js';
+import { sendToUser, isUserOnline } from '../websocket/wsServer.js';
+import { sendNotificationEmail } from './email.js';
 
 let vapidConfigured = false;
 
@@ -19,9 +26,7 @@ export async function initVapid() {
     let privKey = await SystemSettings.findOne({ where: { key: 'push.vapidPrivateKey' } });
 
     if (!pubKey || !privKey) {
-      // Генерируем VAPID ключи
       const keys = webpush.generateVAPIDKeys();
-
       await SystemSettings.findOrCreate({
         where: { key: 'push.vapidPublicKey' },
         defaults: { value: keys.publicKey }
@@ -30,10 +35,8 @@ export async function initVapid() {
         where: { key: 'push.vapidPrivateKey' },
         defaults: { value: keys.privateKey }
       });
-
       pubKey = { value: keys.publicKey };
       privKey = { value: keys.privateKey };
-
       console.log('[Push] VAPID ключи сгенерированы');
     }
 
@@ -51,57 +54,96 @@ export async function initVapid() {
 }
 
 /**
- * Отправить уведомление пользователю
+ * Получить настройки уведомлений пользователя для конкретного триггера.
+ * Возвращает { channelApp, channelPush, channelEmail } или defaults.
+ */
+async function getUserPreference(userId, trigger) {
+  const { NotificationPreference } = getModels();
+  const pref = await NotificationPreference.findOne({
+    where: { userId, trigger }
+  });
+
+  // Дефолты: app=true, push=true, email=false
+  return {
+    channelApp: pref ? pref.channelApp : true,
+    channelPush: pref ? pref.channelPush : true,
+    channelEmail: pref ? pref.channelEmail : false,
+  };
+}
+
+/**
+ * Отправить уведомление пользователю.
+ * Умная маршрутизация: если онлайн — только in-app.
+ *
  * @param {string} userId
  * @param {object} opts - { type, title, body, data }
  */
 export async function notify(userId, { type, title, body, data = {} }) {
-  const { Notification, PushSubscription } = getModels();
+  const { Notification, PushSubscription, User } = getModels();
 
-  // 1. Сохраняем в БД
-  const notification = await Notification.create({
-    userId,
-    type,
-    title,
-    body,
-    data
-  });
+  // Получаем настройки каналов для этого триггера
+  const prefs = await getUserPreference(userId, type);
 
-  // 2. WebSocket (если онлайн)
-  sendToUser(userId, {
-    type: 'notification',
-    data: {
-      id: notification.id,
-      type,
-      title,
-      body,
-      data,
-      isRead: false,
-      createdAt: notification.createdAt
-    }
-  });
+  // 1. Всегда сохраняем в БД (если канал app включён)
+  let notification = null;
+  if (prefs.channelApp) {
+    notification = await Notification.create({
+      userId, type, title, body, data
+    });
+  }
 
-  // 3. Web Push (если есть подписки)
-  if (vapidConfigured) {
+  // Проверяем, онлайн ли пользователь
+  const online = isUserOnline(userId);
+
+  // 2. WebSocket (если онлайн и app включён)
+  if (online && prefs.channelApp) {
+    sendToUser(userId, {
+      type: 'notification',
+      data: {
+        id: notification?.id,
+        type, title, body, data,
+        isRead: false,
+        createdAt: notification?.createdAt || new Date()
+      }
+    });
+  }
+
+  // 3. Если пользователь ОНЛАЙН — не отправляем push и email (анти-спам)
+  if (online) {
+    return notification;
+  }
+
+  // 4. Web Push (если оффлайн + канал включён + есть подписки)
+  if (prefs.channelPush && vapidConfigured) {
     const subscriptions = await PushSubscription.findAll({ where: { userId } });
-
     for (const sub of subscriptions) {
       try {
         await webpush.sendNotification(
           { endpoint: sub.endpoint, keys: sub.keys },
           JSON.stringify({
-            title,
-            body,
-            data: { ...data, notificationId: notification.id },
-            tag: data.ticketId ? `ticket-${data.ticketId}` : `notif-${notification.id}`
+            title, body,
+            data: { ...data, notificationId: notification?.id },
+            tag: data.ticketId ? `ticket-${data.ticketId}` : `notif-${notification?.id}`
           })
         );
       } catch (err) {
-        // 410 Gone — подписка протухла
         if (err.statusCode === 410 || err.statusCode === 404) {
           await sub.destroy();
         }
       }
+    }
+  }
+
+  // 5. Email (если оффлайн + канал включён + есть верифицированный email)
+  if (prefs.channelEmail) {
+    const user = await User.findByPk(userId, { attributes: ['verifiedEmail'] });
+    if (user?.verifiedEmail) {
+      sendNotificationEmail(
+        user.verifiedEmail,
+        title,
+        body,
+        data.ticketNumber || null
+      ).catch(() => {});
     }
   }
 

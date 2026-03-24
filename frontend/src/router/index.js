@@ -1,136 +1,158 @@
+import { createRouter, createWebHistory } from 'vue-router';
+import { useAuthStore } from '@/stores/auth.js';
+
+const routes = [
+  // Public
+  {
+    path: '/setup',
+    name: 'setup',
+    component: () => import('@/pages/SetupWizardPage.vue'),
+    meta: { guest: true }
+  },
+  {
+    path: '/login',
+    name: 'login',
+    component: () => import('@/pages/LoginPage.vue'),
+    meta: { guest: true }
+  },
+  {
+    path: '/register',
+    name: 'register',
+    component: () => import('@/pages/RegisterPage.vue'),
+    meta: { guest: true }
+  },
+
+  // Tickets (all authenticated)
+  {
+    path: '/',
+    name: 'tickets',
+    component: () => import('@/pages/TicketsPage.vue'),
+    meta: { roles: ['USER', 'AGENT', 'ADMIN'] }
+  },
+  {
+    path: '/tickets/new',
+    name: 'new-ticket',
+    component: () => import('@/pages/NewTicketPage.vue'),
+    meta: { roles: ['USER', 'AGENT', 'ADMIN'] }
+  },
+  {
+    path: '/tickets/:id',
+    name: 'ticket-detail',
+    component: () => import('@/pages/TicketDetailPage.vue'),
+    meta: { roles: ['USER', 'AGENT', 'ADMIN'] }
+  },
+
+  {
+    path: '/profile',
+    name: 'profile',
+    component: () => import('@/pages/ProfilePage.vue'),
+    meta: { roles: ['USER', 'AGENT', 'ADMIN'] }
+  },
+
+  // Agent
+  {
+    path: '/delegations',
+    name: 'delegations',
+    component: () => import('@/pages/DelegationsPage.vue'),
+    meta: { roles: ['AGENT', 'ADMIN'] }
+  },
+  {
+    path: '/topic-groups',
+    name: 'topic-groups',
+    component: () => import('@/pages/TopicGroupsPage.vue'),
+    meta: { roles: ['AGENT', 'ADMIN'] }
+  },
+
+  // Admin
+  {
+    path: '/admin',
+    redirect: '/admin/dashboard'
+  },
+  {
+    path: '/admin/dashboard',
+    name: 'admin-dashboard',
+    component: () => import('@/pages/admin/AdminDashboardPage.vue'),
+    meta: { roles: ['ADMIN'], admin: true }
+  },
+  {
+    path: '/admin/users',
+    name: 'admin-users',
+    component: () => import('@/pages/admin/AdminUsersPage.vue'),
+    meta: { roles: ['ADMIN'], admin: true }
+  },
+  {
+    path: '/admin/tickets',
+    name: 'admin-tickets',
+    component: () => import('@/pages/admin/AdminTicketsPage.vue'),
+    meta: { roles: ['ADMIN'], admin: true }
+  },
+  {
+    path: '/admin/topic-groups',
+    name: 'admin-topic-groups',
+    component: () => import('@/pages/admin/AdminTopicGroupsPage.vue'),
+    meta: { roles: ['ADMIN'], admin: true }
+  },
+  {
+    path: '/admin/auth',
+    name: 'admin-auth',
+    component: () => import('@/pages/admin/AdminAuthPage.vue'),
+    meta: { roles: ['ADMIN'], admin: true }
+  },
+  {
+    path: '/admin/custom-fields',
+    name: 'admin-custom-fields',
+    component: () => import('@/pages/admin/AdminCustomFieldsPage.vue'),
+    meta: { roles: ['ADMIN'], admin: true }
+  },
+  {
+    path: '/admin/settings',
+    name: 'admin-settings',
+    component: () => import('@/pages/admin/AdminSettingsPage.vue'),
+    meta: { roles: ['ADMIN'], admin: true }
+  },
+
+  // 404
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'not-found',
+    component: () => import('@/pages/NotFoundPage.vue')
+  }
+];
+
+export const router = createRouter({
+  history: createWebHistory(),
+  routes
+});
+
 /**
- * Кастомный SPA-роутер на hash-навигации.
- * Поддерживает параметры (:id), guard по ролям, layouts.
+ * Router guard: если user = null, пытаемся восстановить сессию
+ * через refresh token ПЕРЕД редиректом на login.
  */
-export class Router {
-  constructor() {
-    this.routes = [];
-    this.currentPage = null;
-    this.container = null;
-    this.getUser = null; // функция для получения текущего пользователя
+router.beforeEach(async (to) => {
+  const authStore = useAuthStore();
+
+  // Guest-only pages — всегда пропускаем
+  if (to.meta.guest) {
+    return true;
   }
 
-  /**
-   * Регистрация маршрута
-   * @param {string} path - шаблон пути (напр. '/tickets/:id')
-   * @param {Function} pageFactory - функция/класс страницы
-   * @param {object} options - { roles, layout }
-   */
-  route(path, pageFactory, options = {}) {
-    this.routes.push({ path, pageFactory, ...options });
-    return this;
-  }
-
-  /**
-   * Установить функцию получения текущего пользователя
-   */
-  setAuthProvider(fn) {
-    this.getUser = fn;
-    return this;
-  }
-
-  /**
-   * Запуск роутера
-   */
-  start(container) {
-    this.container = container;
-    window.addEventListener('hashchange', () => this.resolve());
-    this.resolve();
-  }
-
-  /**
-   * Программная навигация
-   */
-  navigate(path) {
-    window.location.hash = path;
-  }
-
-  /**
-   * Разбор текущего хэша и рендер
-   */
-  resolve() {
-    const hash = window.location.hash.slice(1) || '/';
-
-    for (const route of this.routes) {
-      const params = this._matchRoute(route.path, hash);
-      if (params === null) continue;
-
-      // Guard: проверка роли
-      if (route.roles && this.getUser) {
-        const user = this.getUser();
-        if (!user || !route.roles.includes(user.role)) {
-          this.navigate(user ? '/' : '/login');
-          return;
-        }
-      }
-
-      // Guard: гость (без авторизации)
-      if (route.guest === undefined && route.roles && this.getUser) {
-        const user = this.getUser();
-        if (!user) {
-          this.navigate('/login');
-          return;
-        }
-      }
-
-      this._render(route, params);
-      return;
+  // Protected routes
+  if (to.meta.roles) {
+    // Если нет авторизации — пробуем восстановить через refresh cookie
+    if (!authStore.isAuthenticated) {
+      await authStore.tryRestore();
     }
 
-    // 404
-    this.container.innerHTML = `
-      <div class="error-screen">
-        <h1>404</h1>
-        <p>Страница не найдена</p>
-        <a href="#/" class="btn btn--primary mt-lg">На главную</a>
-      </div>
-    `;
-  }
-
-  /**
-   * Рендер страницы
-   */
-  _render(route, params) {
-    // Уничтожить предыдущую страницу
-    if (this.currentPage && this.currentPage.destroy) {
-      this.currentPage.destroy();
+    // Если всё ещё не авторизован — на логин
+    if (!authStore.isAuthenticated) {
+      return { name: 'login', query: { redirect: to.fullPath } };
     }
 
-    this.container.innerHTML = '';
-
-    const page = typeof route.pageFactory === 'function'
-      ? new route.pageFactory(this, params)
-      : route.pageFactory;
-
-    this.currentPage = page;
-
-    if (page.render) {
-      page.render(this.container);
+    // Проверка роли
+    if (!to.meta.roles.includes(authStore.user.role)) {
+      return { name: 'tickets' };
     }
   }
 
-  /**
-   * Сопоставление пути с шаблоном.
-   * Возвращает объект параметров или null.
-   *
-   * '/tickets/:id' + '/tickets/abc' → { id: 'abc' }
-   */
-  _matchRoute(pattern, path) {
-    const patternParts = pattern.split('/');
-    const pathParts = path.split('/');
-
-    if (patternParts.length !== pathParts.length) return null;
-
-    const params = {};
-
-    for (let i = 0; i < patternParts.length; i++) {
-      if (patternParts[i].startsWith(':')) {
-        params[patternParts[i].slice(1)] = decodeURIComponent(pathParts[i]);
-      } else if (patternParts[i] !== pathParts[i]) {
-        return null;
-      }
-    }
-
-    return params;
-  }
-}
+  return true;
+});

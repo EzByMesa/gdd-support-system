@@ -45,6 +45,11 @@ export default (sequelize) => {
     isActive: {
       type: DataTypes.BOOLEAN,
       defaultValue: true
+    },
+    verifiedEmail: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      defaultValue: null
     }
   }, {
     tableName: 'users',
@@ -59,6 +64,8 @@ export default (sequelize) => {
     User.hasMany(models.AgentAlias, { foreignKey: 'agentId' });
     User.hasMany(models.PushSubscription, { foreignKey: 'userId' });
     User.hasMany(models.Notification, { foreignKey: 'userId' });
+    User.hasMany(models.NotificationPreference, { foreignKey: 'userId' });
+    User.hasMany(models.EmailVerification, { foreignKey: 'userId' });
   };
 
   return User;

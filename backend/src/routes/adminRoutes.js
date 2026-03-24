@@ -259,4 +259,102 @@ router.post('/auth-providers/:id/test', authenticate, requireAdmin, async (req, 
   }
 });
 
+// ==================== SMTP ====================
+
+router.post('/smtp/test', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { testSmtp } = await import('../services/email.js');
+    await testSmtp();
+    res.json({ data: { success: true, message: 'SMTP соединение успешно' } });
+  } catch (err) {
+    res.json({ data: { success: false, message: err.message } });
+  }
+});
+
+router.post('/smtp/reload', authenticate, requireAdmin, async (req, res) => {
+  const { reloadSmtp } = await import('../services/email.js');
+  await reloadSmtp();
+  res.json({ data: { success: true } });
+});
+
+// ==================== CUSTOM FIELDS ====================
+
+router.get('/custom-fields', authenticate, requireAdmin, async (req, res) => {
+  const { CustomField } = getModels();
+  const fields = await CustomField.findAll({ order: [['sortOrder', 'ASC'], ['createdAt', 'ASC']] });
+  res.json({ data: fields });
+});
+
+router.post('/custom-fields', authenticate, requireAdmin, async (req, res) => {
+  const { name, fieldKey, type = 'text', required = false, defaultValue, options, isActive = true } = req.body;
+  const { CustomField } = getModels();
+
+  if (!name || !fieldKey) {
+    return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Укажите название и ключ поля' } });
+  }
+
+  // Валидация ключа: только латиница, цифры, подчёркивания
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(fieldKey)) {
+    return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Ключ поля может содержать только латиницу, цифры и подчёркивания' } });
+  }
+
+  // Определяем sortOrder — последний + 1
+  const maxOrder = await CustomField.max('sortOrder') || 0;
+
+  try {
+    const field = await CustomField.create({
+      name, fieldKey, type, required, defaultValue: defaultValue || null,
+      options: options || null, sortOrder: maxOrder + 1, isActive
+    });
+    res.status(201).json({ data: field });
+  } catch (err) {
+    if (err.name === 'SequelizeUniqueConstraintError') {
+      return res.status(409).json({ error: { code: 'CONFLICT', message: 'Поле с таким ключом уже существует' } });
+    }
+    throw err;
+  }
+});
+
+router.put('/custom-fields/:id', authenticate, requireAdmin, async (req, res) => {
+  const { CustomField } = getModels();
+  const field = await CustomField.findByPk(req.params.id);
+  if (!field) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Поле не найдено' } });
+
+  const { name, type, required, defaultValue, options, isActive } = req.body;
+  if (name !== undefined) field.name = name;
+  if (type !== undefined) field.type = type;
+  if (required !== undefined) field.required = required;
+  if (defaultValue !== undefined) field.defaultValue = defaultValue;
+  if (options !== undefined) field.options = options;
+  if (isActive !== undefined) field.isActive = isActive;
+
+  await field.save();
+  res.json({ data: field });
+});
+
+router.delete('/custom-fields/:id', authenticate, requireAdmin, async (req, res) => {
+  const { CustomField } = getModels();
+  const field = await CustomField.findByPk(req.params.id);
+  if (!field) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Поле не найдено' } });
+
+  await field.destroy();
+  res.status(204).send();
+});
+
+router.put('/custom-fields-reorder', authenticate, requireAdmin, async (req, res) => {
+  const { order } = req.body; // [{id, sortOrder}, ...]
+  const { CustomField } = getModels();
+
+  if (!Array.isArray(order)) {
+    return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Ожидается массив order' } });
+  }
+
+  for (const item of order) {
+    await CustomField.update({ sortOrder: item.sortOrder }, { where: { id: item.id } });
+  }
+
+  const fields = await CustomField.findAll({ order: [['sortOrder', 'ASC']] });
+  res.json({ data: fields });
+});
+
 export default router;

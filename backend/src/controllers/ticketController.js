@@ -2,13 +2,14 @@ import { Op } from 'sequelize';
 import { getModels } from '../models/index.js';
 import { TicketStatus, Role } from '../models/enums.js';
 import { notify } from '../services/notification.js';
+import { broadcastToRoom } from '../websocket/wsServer.js';
 import { iLike } from '../utils/dbCompat.js';
 
 /**
  * POST /api/tickets
  */
 export async function createTicket(req, res) {
-  const { title, description, priority } = req.body;
+  const { title, description, priority, customFields } = req.body;
 
   if (!title || !description) {
     return res.status(400).json({
@@ -22,7 +23,8 @@ export async function createTicket(req, res) {
     title,
     description,
     priority: priority || 'MEDIUM',
-    authorId: req.user.sub
+    authorId: req.user.sub,
+    customFields: customFields || null
   });
 
   const full = await Ticket.findByPk(ticket.id, {
@@ -67,7 +69,7 @@ export async function listTickets(req, res) {
     ];
   }
 
-  const { TopicGroup, DelegationRequest } = getModels();
+  const { TopicGroup, DelegationRequest, AgentAlias } = getModels();
 
   const { count, rows } = await Ticket.findAndCountAll({
     where,
@@ -82,8 +84,31 @@ export async function listTickets(req, res) {
     offset
   });
 
+  const formatted = rows.map(t => formatTicket(t, req.user));
+
+  // Для USER — подменяем имена агентов на псевдонимы в списке
+  if (req.user.role === Role.USER) {
+    const ticketIds = rows.filter(t => t.assigneeId).map(t => t.id);
+    if (ticketIds.length > 0) {
+      const aliases = await AgentAlias.findAll({ where: { ticketId: ticketIds } });
+      const aliasMap = new Map();
+      for (const a of aliases) {
+        aliasMap.set(`${a.agentId}:${a.ticketId}`, a.alias);
+      }
+      for (let i = 0; i < rows.length; i++) {
+        const t = rows[i];
+        if (t.assigneeId) {
+          const alias = aliasMap.get(`${t.assigneeId}:${t.id}`);
+          if (alias) {
+            formatted[i].assignee = { displayName: alias };
+          }
+        }
+      }
+    }
+  }
+
   res.json({
-    data: rows.map(t => formatTicket(t, req.user)),
+    data: formatted,
     pagination: {
       page: parseInt(page),
       limit: parseInt(limit),
@@ -203,7 +228,23 @@ export async function updateStatus(req, res) {
   }
 
   await ticket.save();
-  res.json({ data: formatTicket(ticket, req.user) });
+
+  // Перезагружаем с ассоциациями
+  const { User, Attachment } = getModels();
+  const full = await Ticket.findByPk(ticket.id, {
+    include: [
+      { model: User, as: 'author', attributes: ['id', 'displayName'] },
+      { model: User, as: 'assignee', attributes: ['id', 'displayName'] },
+      { model: Attachment, attributes: ['id', 'originalName', 'mimeType', 'size', 'createdAt'] }
+    ]
+  });
+  res.json({ data: formatTicket(full, req.user) });
+
+  // Оповещаем участников чата о смене статуса через WS
+  broadcastToRoom(ticket.id, {
+    type: 'status_changed',
+    data: { status, ticketId: ticket.id }
+  });
 
   // Уведомление автору тикета
   const statusLabels = { IN_PROGRESS: 'В работе', WAITING_FOR_USER: 'Ожидает ответа', RESOLVED: 'Решён', CLOSED: 'Закрыт' };
@@ -234,6 +275,13 @@ export async function assignTicket(req, res) {
     });
   }
 
+  // Агент не может взять свой собственный тикет
+  if (ticket.authorId === req.user.sub) {
+    return res.status(400).json({
+      error: { code: 'SELF_ASSIGN', message: 'Нельзя взять в работу собственное обращение' }
+    });
+  }
+
   ticket.assigneeId = req.user.sub;
   ticket.status = TicketStatus.IN_PROGRESS;
   await ticket.save();
@@ -242,9 +290,19 @@ export async function assignTicket(req, res) {
   const { getOrCreateAlias } = await import('../services/agentAlias.js');
   const alias = await getOrCreateAlias(req.user.sub, ticket.id);
 
+  // Перезагружаем тикет с ассоциациями для корректного ответа
+  const { User, Attachment } = getModels();
+  const full = await Ticket.findByPk(ticket.id, {
+    include: [
+      { model: User, as: 'author', attributes: ['id', 'displayName'] },
+      { model: User, as: 'assignee', attributes: ['id', 'displayName'] },
+      { model: Attachment, attributes: ['id', 'originalName', 'mimeType', 'size', 'createdAt'] }
+    ]
+  });
+
   res.json({
     data: {
-      ...formatTicket(ticket, req.user),
+      ...formatTicket(full, req.user),
       agentAlias: alias
     }
   });
@@ -285,9 +343,70 @@ export async function updatePriority(req, res) {
 }
 
 /**
- * Форматирование тикета для ответа.
- * Добавляет readonly флаг для агентов.
+ * PUT /api/tickets/:id/close
+ * Пользователь закрывает собственное обращение с указанием причины.
  */
+export async function closeTicket(req, res) {
+  const { reason } = req.body;
+  const { Ticket, User, Attachment } = getModels();
+
+  if (!reason || !reason.trim()) {
+    return res.status(400).json({
+      error: { code: 'VALIDATION_ERROR', message: 'Укажите причину закрытия' }
+    });
+  }
+
+  const ticket = await Ticket.findByPk(req.params.id);
+  if (!ticket) {
+    return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Тикет не найден' } });
+  }
+
+  // Только автор может закрыть своё обращение
+  if (ticket.authorId !== req.user.sub) {
+    return res.status(403).json({
+      error: { code: 'FORBIDDEN', message: 'Вы можете закрыть только своё обращение' }
+    });
+  }
+
+  // Нельзя закрыть уже закрытый тикет
+  if (ticket.status === TicketStatus.CLOSED) {
+    return res.status(400).json({
+      error: { code: 'INVALID_STATUS', message: 'Обращение уже закрыто' }
+    });
+  }
+
+  ticket.status = TicketStatus.CLOSED;
+  ticket.closedAt = new Date();
+  ticket.closedReason = reason.trim();
+  await ticket.save();
+
+  const full = await Ticket.findByPk(ticket.id, {
+    include: [
+      { model: User, as: 'author', attributes: ['id', 'displayName'] },
+      { model: User, as: 'assignee', attributes: ['id', 'displayName'] },
+      { model: Attachment, attributes: ['id', 'originalName', 'mimeType', 'size', 'createdAt'] }
+    ]
+  });
+
+  res.json({ data: formatTicket(full, req.user) });
+
+  // Оповещаем участников чата о закрытии через WS
+  broadcastToRoom(ticket.id, {
+    type: 'status_changed',
+    data: { status: 'CLOSED', ticketId: ticket.id }
+  });
+
+  // Уведомляем назначенного агента
+  if (ticket.assigneeId) {
+    notify(ticket.assigneeId, {
+      type: 'STATUS_CHANGED',
+      title: `Обращение #${ticket.number}`,
+      body: `Пользователь закрыл обращение: ${reason.trim()}`,
+      data: { ticketId: ticket.id }
+    }).catch(() => {});
+  }
+}
+
 /**
  * Фоновая классификация тикета (не блокирует HTTP ответ)
  */
@@ -307,7 +426,9 @@ function formatTicket(ticket, requestUser) {
   const plain = ticket.toJSON ? ticket.toJSON() : { ...ticket };
 
   let readonly = false;
-  if (requestUser.role === Role.AGENT) {
+  if (plain.status === 'CLOSED' || plain.status === 'RESOLVED') {
+    readonly = true;
+  } else if (requestUser.role === Role.AGENT) {
     readonly = !!(plain.assigneeId && plain.assigneeId !== requestUser.sub);
   }
 
@@ -324,9 +445,11 @@ function formatTicket(ticket, requestUser) {
     topicGroup: plain.TopicGroup ? { id: plain.TopicGroup.id, name: plain.TopicGroup.name } : null,
     hasPendingDelegation: !!(plain.DelegationRequests && plain.DelegationRequests.length > 0),
     attachments: plain.Attachments || [],
+    customFields: plain.customFields || null,
     readonly,
     createdAt: plain.createdAt,
     updatedAt: plain.updatedAt,
-    closedAt: plain.closedAt
+    closedAt: plain.closedAt,
+    closedReason: plain.closedReason || null
   };
 }

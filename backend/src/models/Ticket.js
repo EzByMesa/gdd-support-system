@@ -31,6 +31,15 @@ export default (sequelize) => {
     closedAt: {
       type: DataTypes.DATE,
       allowNull: true
+    },
+    closedReason: {
+      type: DataTypes.TEXT,
+      allowNull: true
+    },
+    customFields: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: null
     }
   }, {
     tableName: 'tickets',

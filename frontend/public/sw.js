@@ -29,18 +29,16 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
   const ticketId = event.notification.data?.ticketId;
-  const url = ticketId ? `/#/tickets/${ticketId}` : '/#/';
+  const url = ticketId ? `/tickets/${ticketId}` : '/';
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      // Если уже есть окно — фокусируемся на нём
       for (const client of windowClients) {
         if (client.url.includes(self.location.origin)) {
           client.navigate(url);
           return client.focus();
         }
       }
-      // Иначе открываем новое
       return clients.openWindow(url);
     })
   );

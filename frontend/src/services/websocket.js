@@ -1,19 +1,9 @@
+import { api } from './api.js';
+
 /**
  * WebSocket клиент с автоматическим переподключением.
  */
 export class WsClient {
-  /**
-   * @param {object} opts
-   * @param {string} opts.ticketId
-   * @param {Function} opts.onMessage
-   * @param {Function} opts.onTyping
-   * @param {Function} opts.onHistory
-   * @param {Function} opts.onStatusChanged
-   * @param {Function} opts.onAgentChanged
-   * @param {Function} opts.onError
-   * @param {Function} opts.onConnect
-   * @param {Function} opts.onDisconnect
-   */
   constructor(opts = {}) {
     this.opts = opts;
     this.ws = null;
@@ -27,7 +17,7 @@ export class WsClient {
   connect() {
     if (this.destroyed) return;
 
-    const token = window.__api.accessToken;
+    const token = api.accessToken;
     if (!token) return;
 
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -55,15 +45,12 @@ export class WsClient {
 
     this.ws.onclose = (event) => {
       if (this.opts.onDisconnect) this.opts.onDisconnect();
-
       if (!this.destroyed && event.code !== 4001) {
         this._scheduleReconnect();
       }
     };
 
-    this.ws.onerror = () => {
-      // onclose будет вызван автоматически
-    };
+    this.ws.onerror = () => {};
   }
 
   _handleMessage(msg) {
@@ -92,42 +79,24 @@ export class WsClient {
     }
   }
 
-  /**
-   * Отправить сообщение в чат
-   */
   sendMessage(content, attachmentIds = []) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    this.ws.send(JSON.stringify({
-      type: 'message',
-      content,
-      attachmentIds
-    }));
+    this.ws.send(JSON.stringify({ type: 'message', content, attachmentIds }));
   }
 
-  /**
-   * Отправить индикатор набора (debounced)
-   */
   sendTyping() {
     if (this._typingTimer) return;
-
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'typing' }));
     }
-
-    this._typingTimer = setTimeout(() => {
-      this._typingTimer = null;
-    }, 2000);
+    this._typingTimer = setTimeout(() => { this._typingTimer = null; }, 2000);
   }
 
   _scheduleReconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) return;
-
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
     this.reconnectAttempts++;
-
-    this.reconnectTimer = setTimeout(() => {
-      this.connect();
-    }, delay);
+    this.reconnectTimer = setTimeout(() => { this.connect(); }, delay);
   }
 
   destroy() {

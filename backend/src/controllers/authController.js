@@ -32,7 +32,7 @@ function setRefreshCookie(res, token) {
   res.cookie('refreshToken', token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
+    sameSite: 'lax',
     maxAge: REFRESH_COOKIE_MAX_AGE,
     path: '/'
   });
