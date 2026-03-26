@@ -123,6 +123,30 @@ body {
   padding-left: 0;
 }
 
+.chat-system-message {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  align-self: center;
+  width: 100%;
+}
+
+.chat-system-message__line {
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.chat-system-message__text {
+  display: flex;
+  align-items: center;
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.35);
+  white-space: nowrap;
+  font-style: italic;
+}
+
 .chat-input-area {
   display: flex;
   align-items: flex-end;

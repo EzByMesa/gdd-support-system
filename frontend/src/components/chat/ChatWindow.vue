@@ -8,37 +8,49 @@
       </div>
 
       <div v-for="msg in messages" :key="msg.id || msg.createdAt"
-        :class="['chat-message', { 'chat-message--own': msg.author.id === currentUserId }]">
-        <!-- Author -->
-        <div v-if="msg.author.id !== currentUserId" class="chat-message__author">
-          {{ msg.author.displayName }}
-          <span v-if="msg.author.alias"
-            style="font-weight: normal; font-style: italic; opacity: 0.6; margin-left: 4px; font-size: 0.65rem">
-            ({{ msg.author.alias }})
-          </span>
-        </div>
+        :class="msg.isSystem
+          ? 'chat-system-message'
+          : ['chat-message', { 'chat-message--own': msg.author.id === currentUserId }]">
 
-        <!-- Bubble -->
-        <div class="chat-message__bubble">{{ msg.content }}</div>
+        <!-- System message -->
+        <template v-if="msg.isSystem">
+          <div class="chat-system-message__line"></div>
+          <div class="chat-system-message__text">
+            <v-icon size="14" class="mr-1">mdi-information-outline</v-icon>
+            {{ msg.content }}
+          </div>
+          <div class="chat-system-message__line"></div>
+        </template>
 
-        <!-- Attachments -->
-        <div v-if="msg.attachments?.length" class="d-flex flex-column mt-1" style="gap: 2px">
-          <a v-for="att in msg.attachments" :key="att.id"
-            :href="`/api/attachments/${att.id}/download`" target="_blank"
-            class="text-primary text-decoration-none"
-            style="font-size: 0.75rem; display: flex; align-items: center; gap: 4px">
-            <v-icon size="14">mdi-paperclip</v-icon>
-            {{ att.originalName }}
-          </a>
-        </div>
+        <!-- Regular message -->
+        <template v-else>
+          <!-- Author -->
+          <div v-if="msg.author.id !== currentUserId" class="chat-message__author">
+            {{ msg.author.displayName }}
+          </div>
 
-        <!-- Time -->
-        <div class="chat-message__time">{{ formatChatTime(msg.createdAt) }}</div>
+          <!-- Bubble -->
+          <div class="chat-message__bubble">{{ msg.content }}</div>
+
+          <!-- Attachments -->
+          <div v-if="msg.attachments?.length" class="d-flex flex-column mt-1" style="gap: 2px">
+            <a v-for="att in msg.attachments" :key="att.id"
+              :href="`${config.apiUrl}/attachments/${att.id}/download`" target="_blank"
+              class="text-primary text-decoration-none"
+              style="font-size: 0.75rem; display: flex; align-items: center; gap: 4px">
+              <v-icon size="14">mdi-paperclip</v-icon>
+              {{ att.originalName }}
+            </a>
+          </div>
+
+          <!-- Time -->
+          <div class="chat-message__time">{{ formatChatTime(msg.createdAt) }}</div>
+        </template>
       </div>
     </div>
 
     <!-- Typing -->
-    <div v-if="typingText" class="px-4 py-1" style="font-size: 0.75rem; color: rgba(0,0,0,0.4)">
+    <div v-if="typingText" class="px-4 py-1" style="font-size: 0.75rem; color: rgba(255,255,255,0.5)">
       <v-icon size="14" class="mr-1">mdi-dots-horizontal</v-icon>
       {{ typingText }}
     </div>
@@ -67,12 +79,15 @@ import { WsClient } from '@/services/websocket.js';
 import { api } from '@/services/api.js';
 import { formatChatTime } from '@/utils/format.js';
 import { toast } from '@/composables/useToast.js';
+import config from '@/config.js';
 
 const props = defineProps({
   ticketId: { type: String, required: true },
   currentUserId: { type: String, required: true },
   readonly: { type: Boolean, default: false }
 });
+
+const emit = defineEmits(['ticketUpdated']);
 
 const isReadonly = ref(props.readonly);
 const messages = ref([]);
@@ -82,6 +97,14 @@ const inputEl = ref(null);
 
 let ws = null;
 let typingClearTimer = null;
+let markReadTimer = null;
+
+function markRead() {
+  clearTimeout(markReadTimer);
+  markReadTimer = setTimeout(() => {
+    api.put(`/tickets/${props.ticketId}/read`).catch(() => {});
+  }, 500);
+}
 
 function scrollToBottom() {
   nextTick(() => {
@@ -104,19 +127,25 @@ async function loadHistoryViaApi() {
 function connect() {
   ws = new WsClient({
     ticketId: props.ticketId,
-    onHistory: (msgs) => { messages.value = msgs; scrollToBottom(); },
-    onMessage: (msg) => { messages.value.push(msg); scrollToBottom(); },
+    onHistory: (msgs) => { messages.value = msgs; scrollToBottom(); markRead(); },
+    onMessage: (msg) => { messages.value.push(msg); scrollToBottom(); markRead(); },
     onTyping: (data) => {
       typingText.value = `${data.displayName} печатает...`;
       clearTimeout(typingClearTimer);
       typingClearTimer = setTimeout(() => { typingText.value = ''; }, 3000);
     },
     onStatusChanged: (data) => {
-      toast.info(`Статус изменён: ${data.status}`);
+      emit('ticketUpdated');
       if (data.status === 'CLOSED' || data.status === 'RESOLVED') {
         isReadonly.value = true;
         if (ws) { ws.destroy(); ws = null; }
       }
+    },
+    onTicketUpdated: () => {
+      emit('ticketUpdated');
+    },
+    onAgentChanged: () => {
+      emit('ticketUpdated');
     },
     onError: (data) => { toast.error(data.message); }
   });
@@ -148,19 +177,19 @@ function autoResize() {
 }
 
 watch(() => props.readonly, (val) => {
-  if (val && !isReadonly.value) {
-    isReadonly.value = true;
-    if (ws) { ws.destroy(); ws = null; }
-  }
+  isReadonly.value = val;
+  // При разблокировке — подключить WS если ещё не подключён
+  if (!val && !ws) connect();
 });
 
 onMounted(() => {
-  if (isReadonly.value) loadHistoryViaApi();
-  else connect();
+  // Всегда подключаем WS для live-обновлений (readonly блокирует только ввод)
+  connect();
 });
 
 onUnmounted(() => {
   if (ws) ws.destroy();
   clearTimeout(typingClearTimer);
+  clearTimeout(markReadTimer);
 });
 </script>

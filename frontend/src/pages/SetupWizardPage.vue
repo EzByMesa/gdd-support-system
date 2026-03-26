@@ -302,6 +302,7 @@ import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth.js';
 import { api } from '@/services/api.js';
 import { toast } from '@/composables/useToast.js';
+import config from '@/config.js';
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -345,7 +346,7 @@ const storageError = ref('');
 
 onMounted(async () => {
   try {
-    const res = await fetch('/api/setup/status');
+    const res = await fetch(`${config.apiUrl}/setup/status`);
     const { data } = await res.json();
     if (data.isComplete) { router.replace('/login'); return; }
 
@@ -375,7 +376,7 @@ async function testDatabase() {
   stepError.value = '';
   try {
     const body = buildDbBody();
-    const res = await fetch('/api/setup/step/database', {
+    const res = await fetch(`${config.apiUrl}/setup/step/database`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -398,7 +399,7 @@ async function submitDatabase() {
   stepError.value = '';
   try {
     const body = buildDbBody();
-    const res = await fetch('/api/setup/step/database', {
+    const res = await fetch(`${config.apiUrl}/setup/step/database`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -434,7 +435,7 @@ async function submitAdmin() {
 
   loading.value = true;
   try {
-    const res = await fetch('/api/setup/step/admin', {
+    const res = await fetch(`${config.apiUrl}/setup/step/admin`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -469,7 +470,7 @@ async function submitStorage() {
 
   loading.value = true;
   try {
-    const res = await fetch('/api/setup/step/storage', {
+    const res = await fetch(`${config.apiUrl}/setup/step/storage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ storagePath: storagePath.value })
@@ -493,7 +494,7 @@ async function submitComplete() {
   loading.value = true;
   stepError.value = '';
   try {
-    const res = await fetch('/api/setup/step/complete', {
+    const res = await fetch(`${config.apiUrl}/setup/step/complete`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
     });

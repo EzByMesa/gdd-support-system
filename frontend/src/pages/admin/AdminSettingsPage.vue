@@ -1,79 +1,122 @@
 <template>
   <AdminLayout>
     <v-container fluid>
+      <div class="text-h5 font-weight-bold mb-6">Настройки</div>
+
       <v-row v-if="loading" justify="center" class="my-10">
         <v-progress-circular indeterminate color="primary" size="48" />
       </v-row>
 
       <template v-else>
-        <div class="text-h5 font-weight-bold mb-6">Системные настройки</div>
+        <v-tabs v-model="tab" color="primary" class="mb-4">
+          <v-tab value="general" prepend-icon="mdi-cog">Общие</v-tab>
+          <v-tab value="tickets" prepend-icon="mdi-ticket">Тикеты</v-tab>
+          <v-tab value="email" prepend-icon="mdi-email">Email</v-tab>
+          <v-tab value="features" prepend-icon="mdi-puzzle">Модули</v-tab>
+        </v-tabs>
 
-        <v-card
-          v-for="section in schema"
-          :key="section.section"
-          variant="outlined"
-          class="mb-4"
-        >
-          <v-card-title class="text-subtitle-1 font-weight-bold">
-            {{ section.section }}
-          </v-card-title>
+        <v-tabs-window v-model="tab">
+          <!-- ===== ОБЩИЕ ===== -->
+          <v-tabs-window-item value="general">
+            <v-card variant="outlined" class="mb-4">
+              <v-card-title class="text-subtitle-1 font-weight-bold">Приложение</v-card-title>
+              <v-card-text>
+                <SettingRow label="Название системы" :value="settings['app.name']"
+                  type="text" @save="v => saveSetting('app.name', v)" />
+              </v-card-text>
+            </v-card>
 
-          <v-card-text>
-            <div
-              v-for="item in section.items"
-              :key="item.key"
-              class="d-flex align-center justify-space-between py-3"
-              :class="{ 'border-b': section.items.indexOf(item) < section.items.length - 1 }"
-            >
-              <div style="flex: 1; min-width: 0">
-                <div class="font-weight-medium">{{ item.label }}</div>
-                <div v-if="item.desc" class="text-body-2 text-medium-emphasis">{{ item.desc }}</div>
-              </div>
+            <v-card variant="outlined" class="mb-4">
+              <v-card-title class="text-subtitle-1 font-weight-bold">Регистрация</v-card-title>
+              <v-card-text>
+                <SettingRow label="Самостоятельная регистрация" desc="Разрешить пользователям регистрироваться"
+                  :value="settings['registration.enabled']" type="toggle"
+                  @save="v => saveSetting('registration.enabled', v)" />
+              </v-card-text>
+            </v-card>
 
-              <div class="ml-4" style="flex-shrink: 0">
-                <v-switch
-                  v-if="item.type === 'toggle'"
-                  :model-value="settings[item.key]"
-                  color="primary"
-                  hide-details
-                  inset
-                  density="compact"
-                  @update:model-value="saveSetting(item.key, $event)"
-                />
+            <v-card variant="outlined" class="mb-4">
+              <v-card-title class="text-subtitle-1 font-weight-bold">Хранилище</v-card-title>
+              <v-card-text>
+                <SettingRow label="Макс. размер файла (байт)" desc="По умолчанию 50 МБ"
+                  :value="settings['storage.maxFileSize']" type="number"
+                  @save="v => saveSetting('storage.maxFileSize', parseFloat(v))" />
+                <SettingRow label="Путь к хранилищу" :value="settings['storage.path']"
+                  type="text" readonly />
+              </v-card-text>
+            </v-card>
+          </v-tabs-window-item>
 
-                <v-text-field
-                  v-else
-                  :model-value="settings[item.key] ?? ''"
-                  :type="item.type === 'password' ? 'password' : item.type === 'number' ? 'number' : 'text'"
-                  :readonly="item.readonly"
-                  variant="outlined"
-                  density="compact"
-                  hide-details
-                  style="max-width: 220px"
-                  @update:model-value="debounceSave(item, $event)"
-                />
-              </div>
-            </div>
-          </v-card-text>
-        </v-card>
-        <!-- SMTP Actions -->
-        <v-card variant="outlined" class="mb-4">
-          <v-card-title class="text-subtitle-1 font-weight-bold">
-            Действия SMTP
-          </v-card-title>
-          <v-card-text>
-            <div class="d-flex gap-3">
-              <v-btn color="primary" variant="outlined" :loading="smtpReloadLoading"
-                prepend-icon="mdi-refresh" @click="reloadSmtp">
-                Применить настройки
-              </v-btn>
-              <v-btn color="success" variant="outlined" :loading="smtpTestLoading"
-                prepend-icon="mdi-connection" @click="testSmtp">
-                Проверить соединение
-              </v-btn>
-            </div>
-          </v-card-text>
-        </v-card>
+          <!-- ===== ТИКЕТЫ ===== -->
+          <v-tabs-window-item value="tickets">
+            <v-card variant="outlined" class="mb-4">
+              <v-card-title class="text-subtitle-1 font-weight-bold">Автоматизация</v-card-title>
+              <v-card-text>
+                <SettingRow label="Автозакрытие (дней)" desc="Автозакрытие resolved тикетов через N дней"
+                  :value="settings['tickets.autoCloseAfterDays']" type="number"
+                  @save="v => saveSetting('tickets.autoCloseAfterDays', parseFloat(v))" />
+              </v-card-text>
+            </v-card>
+
+            <v-card variant="outlined" class="mb-4">
+              <v-card-title class="text-subtitle-1 font-weight-bold">ML-группировка</v-card-title>
+              <v-card-text>
+                <SettingRow label="Порог сходства" desc="От 0 до 1, по умолчанию 0.75"
+                  :value="settings['grouping.similarityThreshold']" type="number"
+                  @save="v => saveSetting('grouping.similarityThreshold', parseFloat(v))" />
+              </v-card-text>
+            </v-card>
+          </v-tabs-window-item>
+
+          <!-- ===== EMAIL ===== -->
+          <v-tabs-window-item value="email">
+            <v-card variant="outlined" class="mb-4">
+              <v-card-title class="text-subtitle-1 font-weight-bold">SMTP</v-card-title>
+              <v-card-text>
+                <SettingRow label="Хост" desc="smtp.gmail.com" :value="settings['smtp.host']"
+                  type="text" @save="v => saveSetting('smtp.host', v)" />
+                <SettingRow label="Порт" desc="465 для SSL, 587 для TLS" :value="settings['smtp.port']"
+                  type="number" @save="v => saveSetting('smtp.port', parseFloat(v))" />
+                <SettingRow label="SSL/TLS" :value="settings['smtp.secure']"
+                  type="toggle" @save="v => saveSetting('smtp.secure', v)" />
+                <SettingRow label="Логин" :value="settings['smtp.user']"
+                  type="text" @save="v => saveSetting('smtp.user', v)" />
+                <SettingRow label="Пароль" :value="settings['smtp.pass']"
+                  type="password" @save="v => saveSetting('smtp.pass', v)" />
+                <SettingRow label="Отправитель" desc="noreply@example.com" :value="settings['smtp.from']"
+                  type="text" @save="v => saveSetting('smtp.from', v)" />
+              </v-card-text>
+            </v-card>
+
+            <v-card variant="outlined" class="mb-4">
+              <v-card-text>
+                <div class="d-flex" style="gap: 12px">
+                  <v-btn color="primary" variant="outlined" :loading="smtpReloadLoading"
+                    prepend-icon="mdi-refresh" @click="reloadSmtp">Применить</v-btn>
+                  <v-btn color="success" variant="outlined" :loading="smtpTestLoading"
+                    prepend-icon="mdi-connection" @click="testSmtp">Проверить</v-btn>
+                </div>
+              </v-card-text>
+            </v-card>
+          </v-tabs-window-item>
+
+          <!-- ===== МОДУЛИ ===== -->
+          <v-tabs-window-item value="features">
+            <v-card variant="outlined" class="mb-4">
+              <v-card-title class="text-subtitle-1 font-weight-bold">Функциональные модули</v-card-title>
+              <v-card-text>
+                <SettingRow label="База знаний"
+                  desc="Публичная страница статей, подсказки при создании тикета, конвертация закрытых тикетов"
+                  :value="settings['knowledge.enabled']" type="toggle"
+                  @save="v => saveSetting('knowledge.enabled', v)" />
+              </v-card-text>
+            </v-card>
+
+            <v-alert type="info" variant="tonal">
+              После включения/отключения модулей обновите страницу для применения изменений в навигации.
+            </v-alert>
+          </v-tabs-window-item>
+        </v-tabs-window>
       </template>
     </v-container>
   </AdminLayout>
@@ -84,58 +127,20 @@ import { ref, onMounted } from 'vue';
 import { api } from '@/services/api.js';
 import { toast } from '@/composables/useToast.js';
 import AdminLayout from '@/components/layout/AdminLayout.vue';
+import SettingRow from '@/components/ui/SettingRow.vue';
 
-const schema = [
-  { section: 'Регистрация', items: [
-    { key: 'registration.enabled', label: 'Регистрация пользователей', desc: 'Разрешить самостоятельную регистрацию', type: 'toggle' }
-  ]},
-  { section: 'Хранилище', items: [
-    { key: 'storage.maxFileSize', label: 'Макс. размер файла (байт)', desc: 'По умолчанию 50 МБ', type: 'number' },
-    { key: 'storage.path', label: 'Путь к хранилищу', desc: 'Папка для зашифрованных вложений', type: 'text', readonly: true }
-  ]},
-  { section: 'Тикеты', items: [
-    { key: 'tickets.autoCloseAfterDays', label: 'Автозакрытие (дней)', desc: 'Автозакрытие resolved тикетов', type: 'number' }
-  ]},
-  { section: 'ML-группировка', items: [
-    { key: 'grouping.similarityThreshold', label: 'Порог сходства', desc: 'От 0 до 1, по умолчанию 0.75', type: 'number' }
-  ]},
-  { section: 'Email (SMTP)', items: [
-    { key: 'smtp.host', label: 'SMTP хост', desc: 'Например: smtp.gmail.com', type: 'text' },
-    { key: 'smtp.port', label: 'SMTP порт', desc: '465 для SSL, 587 для TLS', type: 'number' },
-    { key: 'smtp.secure', label: 'SSL/TLS', desc: 'Включить для порта 465', type: 'toggle' },
-    { key: 'smtp.user', label: 'Логин SMTP', type: 'text' },
-    { key: 'smtp.pass', label: 'Пароль SMTP', type: 'password' },
-    { key: 'smtp.from', label: 'Адрес отправителя', desc: 'noreply@example.com', type: 'text' }
-  ]},
-  { section: 'Приложение', items: [
-    { key: 'app.name', label: 'Название системы', type: 'text' }
-  ]}
-];
-
-const smtpTestLoading = ref(false);
-const smtpReloadLoading = ref(false);
-
+const tab = ref('general');
 const settings = ref({});
 const loading = ref(true);
-
-const saveTimers = {};
-
-function debounceSave(item, value) {
-  clearTimeout(saveTimers[item.key]);
-  saveTimers[item.key] = setTimeout(() => {
-    const val = item.type === 'number' ? parseFloat(value) : value;
-    saveSetting(item.key, val);
-  }, 800);
-}
+const smtpTestLoading = ref(false);
+const smtpReloadLoading = ref(false);
 
 async function saveSetting(key, value) {
   try {
     await api.put(`/admin/settings/${key}`, { value });
     settings.value[key] = value;
     toast.success('Сохранено');
-  } catch (err) {
-    toast.error(err.message);
-  }
+  } catch (err) { toast.error(err.message); }
 }
 
 async function testSmtp() {
@@ -152,7 +157,7 @@ async function reloadSmtp() {
   smtpReloadLoading.value = true;
   try {
     await api.post('/admin/smtp/reload');
-    toast.success('SMTP конфигурация обновлена');
+    toast.success('SMTP обновлён');
   } catch (err) { toast.error(err.message); }
   smtpReloadLoading.value = false;
 }
@@ -165,9 +170,3 @@ onMounted(async () => {
   loading.value = false;
 });
 </script>
-
-<style scoped>
-.border-b {
-  border-bottom: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
-}
-</style>

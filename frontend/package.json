@@ -16,6 +16,11 @@
   "dependencies": {
     "@fortawesome/fontawesome-free": "^7.2.0",
     "@mdi/font": "^7.4.47",
+    "@tiptap/extension-image": "^3.20.5",
+    "@tiptap/extension-link": "^3.20.5",
+    "@tiptap/extension-placeholder": "^3.20.5",
+    "@tiptap/starter-kit": "^3.20.5",
+    "@tiptap/vue-3": "^3.20.5",
     "@vitejs/plugin-vue": "^6.0.5",
     "pinia": "^2.3.1",
     "vite-plugin-vuetify": "^2.1.3",

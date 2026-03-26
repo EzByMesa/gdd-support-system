@@ -1,5 +1,6 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import jwt from 'jsonwebtoken';
+import { getModels } from '../models/index.js';
 import { handleChatMessage, handleTyping, sendHistory } from './chatHandler.js';
 
 // Комнаты тикетов: Map<ticketId, Map<ws, userInfo>>
@@ -28,6 +29,14 @@ export function initWebSocket(server) {
       return;
     }
 
+    // Загружаем displayName из БД (JWT не содержит его)
+    try {
+      const { User } = getModels();
+      const dbUser = await User.findByPk(user.sub, { attributes: ['displayName'] });
+      if (dbUser) user.displayName = dbUser.displayName;
+    } catch { /* fallback to login */ }
+    if (!user.displayName) user.displayName = user.login;
+
     ws._user = user;
     ws._ticketId = ticketId;
 
@@ -45,7 +54,8 @@ export function initWebSocket(server) {
       ticketRooms.get(ticketId).set(ws, {
         userId: user.sub,
         role: user.role,
-        login: user.login
+        login: user.login,
+        displayName: user.displayName
       });
 
       // Отправляем историю

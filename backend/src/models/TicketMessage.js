@@ -10,6 +10,10 @@ export default (sequelize) => {
     content: {
       type: DataTypes.TEXT,
       allowNull: false
+    },
+    isSystem: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false
     }
   }, {
     tableName: 'ticket_messages',
@@ -22,7 +26,7 @@ export default (sequelize) => {
 
   TicketMessage.associate = (models) => {
     TicketMessage.belongsTo(models.Ticket, { foreignKey: 'ticketId', onDelete: 'CASCADE' });
-    TicketMessage.belongsTo(models.User, { as: 'author', foreignKey: 'authorId' });
+    TicketMessage.belongsTo(models.User, { as: 'author', foreignKey: { name: 'authorId', allowNull: true } });
     TicketMessage.hasMany(models.Attachment, { foreignKey: 'messageId' });
   };
 

@@ -1,5 +1,6 @@
 export const Role = {
   ADMIN: 'ADMIN',
+  SENIOR_AGENT: 'SENIOR_AGENT',
   AGENT: 'AGENT',
   USER: 'USER'
 };
@@ -31,6 +32,7 @@ export const DelegationStatus = {
 };
 
 export const NotificationType = {
+  NEW_TICKET: 'NEW_TICKET',
   NEW_MESSAGE: 'NEW_MESSAGE',
   STATUS_CHANGED: 'STATUS_CHANGED',
   TICKET_ASSIGNED: 'TICKET_ASSIGNED',

@@ -10,6 +10,21 @@
 
     <v-card class="pa-6">
       <v-form @submit.prevent="handleSubmit">
+        <!-- Staff: select user on behalf of -->
+        <v-autocomplete
+          v-if="isStaff"
+          v-model="selectedUserId"
+          :items="users"
+          item-title="text"
+          item-value="value"
+          label="От имени пользователя *"
+          placeholder="Начните вводить имя..."
+          variant="outlined"
+          class="mb-2"
+          prepend-inner-icon="mdi-account"
+          :rules="[v => !!v || 'Выберите пользователя']"
+        />
+
         <v-text-field
           v-model="form.title"
           label="Тема обращения"
@@ -123,12 +138,36 @@
           class="mb-4"
         />
 
+        <!-- Knowledge suggestions -->
+        <v-card v-if="suggestions.length > 0" variant="tonal" color="info" class="mb-4">
+          <v-card-title class="text-body-1 font-weight-bold">
+            <v-icon start>mdi-lightbulb-outline</v-icon>
+            Возможно, вам поможет:
+          </v-card-title>
+          <v-card-text>
+            <v-card v-for="s in suggestions" :key="s.id" variant="outlined" class="mb-2"
+              style="cursor: pointer" @click="router.push(`/knowledge/${s.id}`)">
+              <v-card-text class="pa-3">
+                <div class="text-body-2 font-weight-medium">{{ s.title }}</div>
+                <div class="text-caption" style="color: rgba(255,255,255,0.5)">{{ s.content }}</div>
+                <v-chip size="x-small" color="primary" variant="tonal" class="mt-1">
+                  Совпадение: {{ s.score }}%
+                </v-chip>
+              </v-card-text>
+            </v-card>
+          </v-card-text>
+        </v-card>
+
         <div class="d-flex justify-space-between">
           <v-btn variant="outlined" @click="router.push('/')">
             Отмена
           </v-btn>
+          <v-btn v-if="suggestions.length > 0" color="warning" variant="outlined" class="mr-2"
+            @click="suggestions = []">
+            Ничего не подошло
+          </v-btn>
           <v-btn color="primary" type="submit" :loading="loading">
-            Создать обращение
+            {{ suggestions.length > 0 ? 'Всё равно создать' : 'Создать обращение' }}
           </v-btn>
         </div>
       </v-form>
@@ -137,19 +176,25 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
+import { useAuthStore } from '@/stores/auth.js';
 import { api } from '@/services/api.js';
 import { toast } from '@/composables/useToast.js';
 import MainLayout from '@/components/layout/MainLayout.vue';
 
 const router = useRouter();
+const authStore = useAuthStore();
 const loading = ref(false);
 const files = ref([]);
+const suggestions = ref([]);
 const fileInputRef = ref(null);
 const customFields = ref([]);
 const customValues = reactive({});
 const customErrors = reactive({});
+const users = ref([]);
+const selectedUserId = ref(null);
+const isStaff = computed(() => ['AGENT', 'ADMIN'].includes(authStore.user?.role));
 
 const form = reactive({
   title: '',
@@ -211,6 +256,19 @@ async function handleSubmit() {
   }
   if (hasCustomError) return;
 
+  // Поиск подсказок из базы знаний (если включена, только для обычных пользователей, первый раз)
+  if (authStore.knowledgeEnabled && !isStaff.value && suggestions.value.length === 0) {
+    try {
+      const searchRes = await api.post('/knowledge/search', {
+        query: `${form.title} ${form.description}`
+      });
+      if (searchRes.data?.length > 0) {
+        suggestions.value = searchRes.data;
+        return; // Показываем подсказки, не создаём тикет
+      }
+    } catch { /* ML недоступен — создаём сразу */ }
+  }
+
   loading.value = true;
   try {
     // Build custom fields data
@@ -224,12 +282,21 @@ async function handleSubmit() {
       }
     }
 
-    const result = await api.post('/tickets', {
+    if (isStaff.value && !selectedUserId.value) {
+      toast.warning('Выберите пользователя');
+      loading.value = false;
+      return;
+    }
+
+    const body = {
       title: form.title,
       description: form.description,
       priority: form.priority,
       customFields: hasCustomData ? cfData : null
-    });
+    };
+    if (isStaff.value) body.onBehalfOfUserId = selectedUserId.value;
+
+    const result = await api.post('/tickets', body);
 
     const ticketId = result.data.id;
 
@@ -250,5 +317,15 @@ async function handleSubmit() {
   }
 }
 
-onMounted(loadCustomFields);
+async function loadUsers() {
+  if (!isStaff.value) return;
+  try {
+    const res = await api.get('/admin/users', { limit: 500 });
+    users.value = (res.data || [])
+      .filter(u => u.isActive)
+      .map(u => ({ value: u.id, text: `${u.displayName} (${u.login})` }));
+  } catch { /* */ }
+}
+
+onMounted(() => { loadCustomFields(); loadUsers(); });
 </script>

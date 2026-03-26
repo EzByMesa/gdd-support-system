@@ -7,8 +7,8 @@ import {
 
 const router = Router();
 
-router.get('/', authenticate, authorize('AGENT', 'ADMIN'), listTopicGroups);
-router.get('/:id', authenticate, authorize('AGENT', 'ADMIN'), getTopicGroup);
+router.get('/', authenticate, authorize('AGENT', 'SENIOR_AGENT', 'ADMIN'), listTopicGroups);
+router.get('/:id', authenticate, authorize('AGENT', 'SENIOR_AGENT', 'ADMIN'), getTopicGroup);
 router.put('/:id', authenticate, requireAdmin, updateTopicGroup);
 router.delete('/:id', authenticate, requireAdmin, deleteTopicGroup);
 router.post('/:id/merge/:otherId', authenticate, requireAdmin, mergeTopicGroups);

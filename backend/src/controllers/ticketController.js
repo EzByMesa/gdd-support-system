@@ -1,15 +1,64 @@
-import { Op } from 'sequelize';
-import { getModels } from '../models/index.js';
+import { Op, literal } from 'sequelize';
+import { getModels, getSequelize } from '../models/index.js';
 import { TicketStatus, Role } from '../models/enums.js';
 import { notify } from '../services/notification.js';
-import { broadcastToRoom } from '../websocket/wsServer.js';
+import { broadcastToRoom, sendToUser } from '../websocket/wsServer.js';
 import { iLike } from '../utils/dbCompat.js';
+
+/** Роли с правами поддержки */
+const STAFF_ROLES = [Role.AGENT, Role.SENIOR_AGENT, Role.ADMIN];
+function isStaffRole(role) { return STAFF_ROLES.includes(role); }
+
+/**
+ * Создать системное сообщение в чате тикета и разослать через WS.
+ */
+async function createSystemMessage(ticketId, content) {
+  const { TicketMessage } = getModels();
+  const msg = await TicketMessage.create({ ticketId, content, isSystem: true, authorId: null });
+
+  const payload = {
+    type: 'message',
+    data: {
+      id: msg.id,
+      content: msg.content,
+      isSystem: true,
+      createdAt: msg.createdAt,
+      author: { id: null, displayName: 'Система' },
+      attachments: []
+    }
+  };
+  broadcastToRoom(ticketId, payload);
+  return msg;
+}
+
+/**
+ * Upsert lastReadAt для пользователя в тикете.
+ */
+export async function upsertReadStatus(userId, ticketId) {
+  const { TicketReadStatus } = getModels();
+  const [record] = await TicketReadStatus.findOrCreate({
+    where: { userId, ticketId },
+    defaults: { lastReadAt: new Date() }
+  });
+  if (record) {
+    record.lastReadAt = new Date();
+    await record.save();
+  }
+}
+
+/**
+ * PUT /api/tickets/:id/read
+ */
+export async function markTicketRead(req, res) {
+  await upsertReadStatus(req.user.sub, req.params.id);
+  res.json({ data: { success: true } });
+}
 
 /**
  * POST /api/tickets
  */
 export async function createTicket(req, res) {
-  const { title, description, priority, customFields } = req.body;
+  const { title, description, priority, customFields, onBehalfOfUserId } = req.body;
 
   if (!title || !description) {
     return res.status(400).json({
@@ -18,23 +67,63 @@ export async function createTicket(req, res) {
   }
 
   const { Ticket, User } = getModels();
+  const isStaff = isStaffRole(req.user.role);
+
+  // Агенты/админы создают тикеты ТОЛЬКО от имени других пользователей
+  let authorId = req.user.sub;
+  let createdById = null;
+
+  if (isStaff) {
+    if (!onBehalfOfUserId) {
+      return res.status(400).json({
+        error: { code: 'VALIDATION_ERROR', message: 'Выберите пользователя, от имени которого создаётся обращение' }
+      });
+    }
+    const targetUser = await User.findByPk(onBehalfOfUserId);
+    if (!targetUser) {
+      return res.status(400).json({
+        error: { code: 'NOT_FOUND', message: 'Пользователь не найден' }
+      });
+    }
+    authorId = onBehalfOfUserId;
+    createdById = req.user.sub;
+  }
 
   const ticket = await Ticket.create({
     title,
     description,
     priority: priority || 'MEDIUM',
-    authorId: req.user.sub,
+    authorId,
+    createdById,
     customFields: customFields || null
   });
 
   const full = await Ticket.findByPk(ticket.id, {
     include: [
-      { model: User, as: 'author', attributes: ['id', 'displayName'] },
+      { model: User, as: 'author', attributes: ['id', 'displayName', 'avatarPath'] },
       { model: getModels().Attachment }
     ]
   });
 
   res.status(201).json({ data: formatTicket(full, req.user) });
+
+  // Уведомить всех агентов и админов о новом обращении
+  const agents = await User.findAll({
+    where: { role: STAFF_ROLES, isActive: true },
+    attributes: ['id']
+  });
+  for (const agent of agents) {
+    if (agent.id === req.user.sub) continue;
+    // WS-событие для автообновления списка тикетов
+    sendToUser(agent.id, { type: 'tickets_updated' });
+    // Уведомление
+    notify(agent.id, {
+      type: 'NEW_TICKET',
+      title: `Новое обращение #${ticket.number}`,
+      body: title,
+      data: { ticketId: ticket.id }
+    }).catch(() => {});
+  }
 
   // Фоновая классификация (не блокирует ответ)
   classifyInBackground(ticket.id, title, description);
@@ -44,7 +133,7 @@ export async function createTicket(req, res) {
  * GET /api/tickets
  */
 export async function listTickets(req, res) {
-  const { page = 1, limit = 20, status, priority, search, assignee } = req.query;
+  const { page = 1, limit = 20, status, priority, search, assignee, sort = 'createdAt', sortDir = 'DESC' } = req.query;
   const offset = (parseInt(page) - 1) * parseInt(limit);
   const { Ticket, User } = getModels();
 
@@ -69,41 +158,44 @@ export async function listTickets(req, res) {
     ];
   }
 
-  const { TopicGroup, DelegationRequest, AgentAlias } = getModels();
+  const { TopicGroup, DelegationRequest } = getModels();
 
   const { count, rows } = await Ticket.findAndCountAll({
     where,
     include: [
-      { model: User, as: 'author', attributes: ['id', 'displayName'] },
+      { model: User, as: 'author', attributes: ['id', 'displayName', 'avatarPath'] },
       { model: User, as: 'assignee', attributes: ['id', 'displayName'] },
+      { model: User, as: 'createdBy', attributes: ['id', 'displayName'] },
       { model: TopicGroup, attributes: ['id', 'name'] },
       { model: DelegationRequest, where: { status: 'PENDING' }, required: false, attributes: ['id'] }
     ],
-    order: [['createdAt', 'DESC']],
+    order: [[['createdAt', 'updatedAt', 'priority', 'status', 'number'].includes(sort) ? sort : 'createdAt', ['ASC', 'DESC'].includes(sortDir?.toUpperCase()) ? sortDir.toUpperCase() : 'DESC']],
     limit: parseInt(limit),
     offset
   });
 
   const formatted = rows.map(t => formatTicket(t, req.user));
 
-  // Для USER — подменяем имена агентов на псевдонимы в списке
-  if (req.user.role === Role.USER) {
-    const ticketIds = rows.filter(t => t.assigneeId).map(t => t.id);
-    if (ticketIds.length > 0) {
-      const aliases = await AgentAlias.findAll({ where: { ticketId: ticketIds } });
-      const aliasMap = new Map();
-      for (const a of aliases) {
-        aliasMap.set(`${a.agentId}:${a.ticketId}`, a.alias);
-      }
-      for (let i = 0; i < rows.length; i++) {
-        const t = rows[i];
-        if (t.assigneeId) {
-          const alias = aliasMap.get(`${t.assigneeId}:${t.id}`);
-          if (alias) {
-            formatted[i].assignee = { displayName: alias };
-          }
-        }
-      }
+  // Считаем непрочитанные сообщения batch-запросом (1 запрос вместо N)
+  const ticketIds = rows.map(t => t.id);
+  if (ticketIds.length > 0) {
+    const sequelize = getSequelize();
+    const idList = ticketIds.map(id => `'${id}'`).join(',');
+    const [unreadRows] = await sequelize.query(`
+      SELECT tm."ticketId", COUNT(*) as cnt
+      FROM ticket_messages tm
+      LEFT JOIN ticket_read_statuses trs
+        ON trs."ticketId" = tm."ticketId" AND trs."userId" = '${req.user.sub}'
+      WHERE tm."ticketId" IN (${idList})
+        AND tm."authorId" != '${req.user.sub}'
+        AND (tm."isSystem" = false OR tm."isSystem" IS NULL)
+        AND (trs."lastReadAt" IS NULL OR tm."createdAt" > trs."lastReadAt")
+      GROUP BY tm."ticketId"
+    `);
+    const unreadMap = new Map();
+    for (const r of unreadRows) unreadMap.set(r.ticketId, parseInt(r.cnt));
+    for (let i = 0; i < formatted.length; i++) {
+      formatted[i].unreadCount = unreadMap.get(rows[i].id) || 0;
     }
   }
 
@@ -122,12 +214,13 @@ export async function listTickets(req, res) {
  * GET /api/tickets/:id
  */
 export async function getTicket(req, res) {
-  const { Ticket, User, Attachment, TicketMessage, AgentAlias } = getModels();
+  const { Ticket, User, Attachment } = getModels();
 
   const ticket = await Ticket.findByPk(req.params.id, {
     include: [
-      { model: User, as: 'author', attributes: ['id', 'displayName'] },
+      { model: User, as: 'author', attributes: ['id', 'displayName', 'avatarPath'] },
       { model: User, as: 'assignee', attributes: ['id', 'displayName'] },
+      { model: User, as: 'createdBy', attributes: ['id', 'displayName'] },
       { model: Attachment, attributes: ['id', 'originalName', 'mimeType', 'size', 'createdAt'] }
     ]
   });
@@ -146,16 +239,6 @@ export async function getTicket(req, res) {
   }
 
   const result = formatTicket(ticket, req.user);
-
-  // Для USER — подменяем имя агента на псевдоним
-  if (req.user.role === Role.USER && ticket.assigneeId) {
-    const alias = await AgentAlias.findOne({
-      where: { agentId: ticket.assigneeId, ticketId: ticket.id }
-    });
-    if (alias) {
-      result.assignee = { displayName: alias.alias };
-    }
-  }
 
   res.json({ data: result });
 }
@@ -186,6 +269,14 @@ export async function updateTicket(req, res) {
 
   await ticket.save();
   res.json({ data: formatTicket(ticket, req.user) });
+
+  broadcastToRoom(ticket.id, { type: 'ticket_updated', data: { ticketId: ticket.id } });
+  if (ticket.assigneeId && ticket.assigneeId !== req.user.sub) {
+    sendToUser(ticket.assigneeId, { type: 'tickets_updated' });
+  }
+  if (ticket.authorId !== req.user.sub) {
+    sendToUser(ticket.authorId, { type: 'tickets_updated' });
+  }
 }
 
 /**
@@ -212,6 +303,7 @@ export async function updateStatus(req, res) {
       error: { code: 'FORBIDDEN', message: 'Нет прав' }
     });
   }
+  // AGENT ограничен своими тикетами, SENIOR_AGENT и ADMIN — нет
   if (req.user.role === Role.AGENT) {
     const isAssignee = ticket.assigneeId === req.user.sub;
     const isAuthor = ticket.authorId === req.user.sub;
@@ -233,21 +325,32 @@ export async function updateStatus(req, res) {
   const { User, Attachment } = getModels();
   const full = await Ticket.findByPk(ticket.id, {
     include: [
-      { model: User, as: 'author', attributes: ['id', 'displayName'] },
+      { model: User, as: 'author', attributes: ['id', 'displayName', 'avatarPath'] },
       { model: User, as: 'assignee', attributes: ['id', 'displayName'] },
+      { model: User, as: 'createdBy', attributes: ['id', 'displayName'] },
       { model: Attachment, attributes: ['id', 'originalName', 'mimeType', 'size', 'createdAt'] }
     ]
   });
   res.json({ data: formatTicket(full, req.user) });
 
   // Оповещаем участников чата о смене статуса через WS
+  const statusLabels = { IN_PROGRESS: 'В работе', WAITING_FOR_USER: 'Ожидает ответа', RESOLVED: 'Решён', CLOSED: 'Закрыт' };
+
   broadcastToRoom(ticket.id, {
     type: 'status_changed',
     data: { status, ticketId: ticket.id }
   });
 
+  // Системное сообщение в чат
+  await createSystemMessage(ticket.id, `Статус изменён: ${statusLabels[status] || status}`);
+
+  // Обновление списка тикетов у участников
+  sendToUser(ticket.authorId, { type: 'tickets_updated' });
+  if (ticket.assigneeId && ticket.assigneeId !== req.user.sub) {
+    sendToUser(ticket.assigneeId, { type: 'tickets_updated' });
+  }
+
   // Уведомление автору тикета
-  const statusLabels = { IN_PROGRESS: 'В работе', WAITING_FOR_USER: 'Ожидает ответа', RESOLVED: 'Решён', CLOSED: 'Закрыт' };
   notify(ticket.authorId, {
     type: 'STATUS_CHANGED',
     title: `Обращение #${ticket.number}`,
@@ -286,32 +389,54 @@ export async function assignTicket(req, res) {
   ticket.status = TicketStatus.IN_PROGRESS;
   await ticket.save();
 
-  // Генерируем анонимный псевдоним
-  const { getOrCreateAlias } = await import('../services/agentAlias.js');
-  const alias = await getOrCreateAlias(req.user.sub, ticket.id);
+  // Удаляем уведомления NEW_TICKET у всех агентов (тикет взят)
+  const { Notification: NotifModel } = getModels();
+  await NotifModel.destroy({
+    where: {
+      type: 'NEW_TICKET',
+      [Op.or]: [
+        literal(`"data"->>'ticketId' = '${ticket.id}'`),       // PostgreSQL
+        literal(`json_extract("data", '$.ticketId') = '${ticket.id}'`) // SQLite
+      ]
+    }
+  }).catch(() => {});
 
   // Перезагружаем тикет с ассоциациями для корректного ответа
   const { User, Attachment } = getModels();
   const full = await Ticket.findByPk(ticket.id, {
     include: [
-      { model: User, as: 'author', attributes: ['id', 'displayName'] },
+      { model: User, as: 'author', attributes: ['id', 'displayName', 'avatarPath'] },
       { model: User, as: 'assignee', attributes: ['id', 'displayName'] },
+      { model: User, as: 'createdBy', attributes: ['id', 'displayName'] },
       { model: Attachment, attributes: ['id', 'originalName', 'mimeType', 'size', 'createdAt'] }
     ]
   });
 
-  res.json({
-    data: {
-      ...formatTicket(full, req.user),
-      agentAlias: alias
-    }
+  const agentName = full.assignee?.displayName || 'Агент';
+
+  res.json({ data: formatTicket(full, req.user) });
+
+  // Системное сообщение в чат с реальным именем
+  await createSystemMessage(ticket.id, `Вашим обращением занялся ${agentName}`);
+
+  // Broadcast обновление тикета всем в комнате
+  broadcastToRoom(ticket.id, {
+    type: 'ticket_updated',
+    data: { ticketId: ticket.id, status: ticket.status }
   });
+
+  // tickets_updated для автора + всех агентов (тикет ушёл из очереди)
+  sendToUser(ticket.authorId, { type: 'tickets_updated' });
+  const allAgents = await User.findAll({ where: { role: STAFF_ROLES, isActive: true }, attributes: ['id'] });
+  for (const a of allAgents) {
+    if (a.id !== req.user.sub) sendToUser(a.id, { type: 'tickets_updated' });
+  }
 
   // Уведомление автору тикета
   notify(ticket.authorId, {
     type: 'TICKET_ASSIGNED',
     title: `Обращение #${ticket.number}`,
-    body: `Вашим обращением занимается ${alias}`,
+    body: `Вашим обращением занимается ${agentName}`,
     data: { ticketId: ticket.id }
   }).catch(() => {});
 }
@@ -328,6 +453,7 @@ export async function updatePriority(req, res) {
     return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Тикет не найден' } });
   }
 
+  // AGENT ограничен своими, SENIOR_AGENT и ADMIN — нет
   if (req.user.role === Role.AGENT && ticket.assigneeId !== req.user.sub) {
     return res.status(403).json({
       error: { code: 'TICKET_READONLY', message: 'Тикет назначен на другого агента' }
@@ -340,6 +466,13 @@ export async function updatePriority(req, res) {
   ticket.priority = priority;
   await ticket.save();
   res.json({ data: formatTicket(ticket, req.user) });
+
+  // WS обновления
+  broadcastToRoom(ticket.id, { type: 'ticket_updated', data: { ticketId: ticket.id } });
+  sendToUser(ticket.authorId, { type: 'tickets_updated' });
+  if (ticket.assigneeId && ticket.assigneeId !== req.user.sub) {
+    sendToUser(ticket.assigneeId, { type: 'tickets_updated' });
+  }
 }
 
 /**
@@ -382,13 +515,17 @@ export async function closeTicket(req, res) {
 
   const full = await Ticket.findByPk(ticket.id, {
     include: [
-      { model: User, as: 'author', attributes: ['id', 'displayName'] },
+      { model: User, as: 'author', attributes: ['id', 'displayName', 'avatarPath'] },
       { model: User, as: 'assignee', attributes: ['id', 'displayName'] },
+      { model: User, as: 'createdBy', attributes: ['id', 'displayName'] },
       { model: Attachment, attributes: ['id', 'originalName', 'mimeType', 'size', 'createdAt'] }
     ]
   });
 
   res.json({ data: formatTicket(full, req.user) });
+
+  // Системное сообщение в чат
+  await createSystemMessage(ticket.id, `Обращение закрыто пользователем`);
 
   // Оповещаем участников чата о закрытии через WS
   broadcastToRoom(ticket.id, {
@@ -396,8 +533,9 @@ export async function closeTicket(req, res) {
     data: { status: 'CLOSED', ticketId: ticket.id }
   });
 
-  // Уведомляем назначенного агента
+  // tickets_updated для assignee
   if (ticket.assigneeId) {
+    sendToUser(ticket.assigneeId, { type: 'tickets_updated' });
     notify(ticket.assigneeId, {
       type: 'STATUS_CHANGED',
       title: `Обращение #${ticket.number}`,
@@ -429,6 +567,7 @@ function formatTicket(ticket, requestUser) {
   if (plain.status === 'CLOSED' || plain.status === 'RESOLVED') {
     readonly = true;
   } else if (requestUser.role === Role.AGENT) {
+    // Обычный AGENT readonly для чужих тикетов, SENIOR_AGENT/ADMIN — нет
     readonly = !!(plain.assigneeId && plain.assigneeId !== requestUser.sub);
   }
 
@@ -441,6 +580,7 @@ function formatTicket(ticket, requestUser) {
     priority: plain.priority,
     author: plain.author || null,
     assignee: plain.assignee || null,
+    createdBy: plain.createdBy || null,
     topicGroupId: plain.topicGroupId,
     topicGroup: plain.TopicGroup ? { id: plain.TopicGroup.id, name: plain.TopicGroup.name } : null,
     hasPendingDelegation: !!(plain.DelegationRequests && plain.DelegationRequests.length > 0),

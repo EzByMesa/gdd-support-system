@@ -1,10 +1,11 @@
 import { Router } from 'express';
-import { Op } from 'sequelize';
+import { Op, literal } from 'sequelize';
 import bcrypt from 'bcryptjs';
 import { authenticate, requireAdmin } from '../middleware/auth.js';
 import { getModels } from '../models/index.js';
 import { iLike } from '../utils/dbCompat.js';
 import { Role } from '../models/enums.js';
+import { sendToUser } from '../websocket/wsServer.js';
 
 const router = Router();
 
@@ -113,6 +114,9 @@ router.put('/users/:id', authenticate, requireAdmin, async (req, res) => {
 
   await user.save();
   res.json({ data: user.toJSON() });
+
+  // WS: уведомить пользователя об обновлении профиля
+  sendToUser(user.id, { type: 'profile_updated' });
 });
 
 router.put('/users/:id/role', authenticate, requireAdmin, async (req, res) => {
@@ -130,6 +134,9 @@ router.put('/users/:id/role', authenticate, requireAdmin, async (req, res) => {
   await user.save();
 
   res.json({ data: { id: user.id, role: user.role } });
+
+  // WS: уведомить пользователя — его роль изменилась (перезагрузить страницу)
+  sendToUser(user.id, { type: 'profile_updated' });
 });
 
 router.put('/users/:id/active', authenticate, requireAdmin, async (req, res) => {
@@ -143,10 +150,14 @@ router.put('/users/:id/active', authenticate, requireAdmin, async (req, res) => 
   await user.save();
 
   res.json({ data: { id: user.id, isActive: user.isActive } });
+
+  // WS: если деактивирован — принудительный logout
+  if (!user.isActive) sendToUser(user.id, { type: 'force_logout' });
 });
 
 router.delete('/users/:id', authenticate, requireAdmin, async (req, res) => {
-  const { User } = getModels();
+  const { User, Ticket, TicketMessage, Notification, PushSubscription, NotificationPreference,
+    EmailVerification, AgentAlias, Attachment, DelegationRequest, TicketReadStatus, KnowledgeArticle } = getModels();
   const user = await User.findByPk(req.params.id);
   if (!user) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Пользователь не найден' } });
 
@@ -154,10 +165,40 @@ router.delete('/users/:id', authenticate, requireAdmin, async (req, res) => {
     return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Нельзя удалить корневого администратора' } });
   }
 
-  // Soft delete — деактивация
-  user.isActive = false;
-  await user.save();
-  res.status(204).send();
+  if (user.id === req.user.sub) {
+    return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Нельзя удалить самого себя' } });
+  }
+
+  console.log(`[Admin] Удаление пользователя "${user.displayName}" (@${user.login}), id=${user.id}`);
+
+  // Удаляем все связанные данные
+  await Notification.destroy({ where: { userId: user.id } }).catch(() => {});
+  await PushSubscription.destroy({ where: { userId: user.id } }).catch(() => {});
+  await NotificationPreference.destroy({ where: { userId: user.id } }).catch(() => {});
+  await EmailVerification.destroy({ where: { userId: user.id } }).catch(() => {});
+  await AgentAlias.destroy({ where: { agentId: user.id } }).catch(() => {});
+  await TicketReadStatus.destroy({ where: { userId: user.id } }).catch(() => {});
+  await DelegationRequest.destroy({ where: { fromAgentId: user.id } }).catch(() => {});
+  await DelegationRequest.destroy({ where: { toAgentId: user.id } }).catch(() => {});
+
+  // Обнуляем ВСЕ FK-ссылки (не удаляем тикеты/сообщения/вложения)
+  await Ticket.update({ authorId: null }, { where: { authorId: user.id } }).catch(() => {});
+  await Ticket.update({ assigneeId: null }, { where: { assigneeId: user.id } }).catch(() => {});
+  await Ticket.update({ createdById: null }, { where: { createdById: user.id } }).catch(() => {});
+  await TicketMessage.update({ authorId: null }, { where: { authorId: user.id } }).catch(() => {});
+  await Attachment.update({ uploadedById: null }, { where: { uploadedById: user.id } }).catch(() => {});
+  await KnowledgeArticle.update({ authorId: null }, { where: { authorId: user.id } }).catch(() => {});
+
+  sendToUser(user.id, { type: 'force_logout' });
+
+  // Удаляем пользователя
+  try {
+    await user.destroy();
+    res.status(204).send();
+  } catch (err) {
+    console.error(`[Admin] Ошибка удаления пользователя: ${err.message}`);
+    res.status(500).json({ error: { code: 'DELETE_FAILED', message: `Не удалось удалить: ${err.message}` } });
+  }
 });
 
 // ==================== SETTINGS ====================
@@ -190,6 +231,37 @@ router.put('/settings/:key', authenticate, requireAdmin, async (req, res) => {
   res.json({ data: { key: req.params.key, value } });
 });
 
+// ==================== TICKETS ====================
+
+router.delete('/tickets/:id', authenticate, requireAdmin, async (req, res) => {
+  const { Ticket, TicketMessage, Attachment, AgentAlias, DelegationRequest, Notification } = getModels();
+  const ticket = await Ticket.findByPk(req.params.id);
+  if (!ticket) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Тикет не найден' } });
+
+  console.log(`[Admin] Удаление тикета #${ticket.number} "${ticket.title}" (${ticket.id})`);
+
+  // Удаляем связанные уведомления
+  await Notification.destroy({
+    where: {
+      [Op.or]: [
+        literal(`"data"->>'ticketId' = '${ticket.id}'`),
+        literal(`json_extract("data", '$.ticketId') = '${ticket.id}'`)
+      ]
+    }
+  }).catch(() => {});
+  await DelegationRequest.destroy({ where: { ticketId: ticket.id } });
+  await AgentAlias.destroy({ where: { ticketId: ticket.id } });
+  await Attachment.destroy({ where: { ticketId: ticket.id } });
+  await TicketMessage.destroy({ where: { ticketId: ticket.id } });
+  // WS: обновить списки у автора и assignee
+  if (ticket.authorId) sendToUser(ticket.authorId, { type: 'tickets_updated' });
+  if (ticket.assigneeId) sendToUser(ticket.assigneeId, { type: 'tickets_updated' });
+
+  await ticket.destroy();
+
+  res.status(204).send();
+});
+
 // ==================== AUTH PROVIDERS ====================
 
 router.get('/auth-providers', authenticate, requireAdmin, async (req, res) => {
@@ -206,10 +278,18 @@ router.post('/auth-providers', authenticate, requireAdmin, async (req, res) => {
     return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Укажите тип и имя провайдера' } });
   }
 
+  console.log(`[Provider] Создание провайдера: type=${type}, name="${name}", isActive=${isActive !== false}`);
+  if (config) {
+    console.log(`[Provider]   baseUrl: ${config.baseUrl || '(не задан)'}`);
+    console.log(`[Provider]   authEndpoint: ${config.authEndpoint || '/auth/validate'}`);
+    console.log(`[Provider]   timeout: ${config.timeout || 5000}ms`);
+  }
+
   const provider = await AuthProvider.create({
     type, name, config: config || {}, isActive: isActive !== false
   });
 
+  console.log(`[Provider] Провайдер создан: id=${provider.id}`);
   res.status(201).json({ data: provider });
 });
 
@@ -219,6 +299,22 @@ router.put('/auth-providers/:id', authenticate, requireAdmin, async (req, res) =
   if (!provider) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Провайдер не найден' } });
 
   const { name, config, isActive } = req.body;
+
+  const changes = [];
+  if (name && name !== provider.name) changes.push(`name: "${provider.name}" → "${name}"`);
+  if (isActive !== undefined && isActive !== provider.isActive) changes.push(`isActive: ${provider.isActive} → ${isActive}`);
+  if (config) {
+    const old = provider.config || {};
+    if (config.baseUrl !== old.baseUrl) changes.push(`baseUrl: "${old.baseUrl || ''}" → "${config.baseUrl}"`);
+    if (config.authEndpoint !== old.authEndpoint) changes.push(`authEndpoint: "${old.authEndpoint || ''}" → "${config.authEndpoint}"`);
+    if (config.timeout !== old.timeout) changes.push(`timeout: ${old.timeout || 5000} → ${config.timeout}`);
+  }
+
+  if (changes.length) {
+    console.log(`[Provider] Обновление провайдера "${provider.name}" (${provider.id}):`);
+    changes.forEach(c => console.log(`[Provider]   ${c}`));
+  }
+
   if (name) provider.name = name;
   if (config) provider.config = config;
   if (isActive !== undefined) provider.isActive = isActive;
@@ -232,6 +328,7 @@ router.delete('/auth-providers/:id', authenticate, requireAdmin, async (req, res
   const provider = await AuthProvider.findByPk(req.params.id);
   if (!provider) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Провайдер не найден' } });
 
+  console.log(`[Provider] Удаление провайдера "${provider.name}" (${provider.id}), type=${provider.type}`);
   await provider.destroy();
   res.status(204).send();
 });
@@ -242,17 +339,74 @@ router.post('/auth-providers/:id/test', authenticate, requireAdmin, async (req, 
   if (!provider) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Провайдер не найден' } });
 
   if (provider.type === 'ONE_C') {
+    const { login, password } = req.body;
+    if (!login || !password) {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Укажите логин и пароль для тестирования' } });
+    }
+
     const config = provider.config || {};
+    const url = `${config.baseUrl}${config.authEndpoint || '/auth/validate'}`;
+    const timeout = config.timeout || 5000;
+
+    const authHeader = 'Basic ' + Buffer.from(`${login}:${password}`).toString('base64');
+
+    console.log(`[Provider] Тест подключения "${provider.name}" (${provider.id})`);
+    console.log(`[Provider]   URL: POST ${url}`);
+    console.log(`[Provider]   Логин: ${login}`);
+    console.log(`[Provider]   Authorization: Basic ${Buffer.from(`${login}:***`).toString('base64')}`);
+    console.log(`[Provider]   Таймаут: ${timeout}ms`);
+
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), config.timeout || 5000);
-      const testRes = await fetch(`${config.baseUrl}${config.authEndpoint || '/auth/validate'}`, {
-        method: 'HEAD', signal: controller.signal
+      const timer = setTimeout(() => controller.abort(), timeout);
+      const testRes = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': authHeader,
+          'Content-Type': 'application/json'
+        },
+        signal: controller.signal
       });
       clearTimeout(timer);
-      res.json({ data: { success: true, status: testRes.status, message: 'Сервер 1С доступен' } });
+
+      console.log(`[Provider]   Ответ: HTTP ${testRes.status} ${testRes.statusText}`);
+
+      let responseData = null;
+      try {
+        responseData = await testRes.json();
+        console.log(`[Provider]   Body: ${JSON.stringify(responseData).substring(0, 500)}`);
+      } catch {
+        console.log(`[Provider]   Body: (не JSON)`);
+      }
+
+      if (!testRes.ok) {
+        console.log(`[Provider]   Результат: ОШИБКА`);
+        res.json({ data: { success: false, status: testRes.status, message: `Сервер вернул ${testRes.status}`, response: responseData } });
+      } else {
+        console.log(`[Provider]   Результат: УСПЕХ`);
+        res.json({ data: { success: true, status: testRes.status, message: 'Подключение успешно', response: responseData } });
+      }
     } catch (err) {
-      res.json({ data: { success: false, message: `Недоступен: ${err.message}` } });
+      if (err.name === 'AbortError') {
+        console.log(`[Provider]   Результат: ТАЙМАУТ (${timeout}ms)`);
+        res.json({ data: { success: false, message: `Сервер не ответил вовремя (таймаут ${timeout}ms)` } });
+      } else {
+        const cause = err.cause || {};
+        console.error(`[Provider]   Результат: НЕДОСТУПЕН`);
+        console.error(`[Provider]   Ошибка: ${err.message}`);
+        console.error(`[Provider]   Тип: ${err.name || 'Error'}`);
+        if (cause.code) console.error(`[Provider]   Код: ${cause.code}`);
+        if (cause.syscall) console.error(`[Provider]   Syscall: ${cause.syscall}`);
+        if (cause.hostname) console.error(`[Provider]   Hostname: ${cause.hostname}`);
+        if (cause.port) console.error(`[Provider]   Port: ${cause.port}`);
+        if (cause.address) console.error(`[Provider]   Address: ${cause.address}`);
+        console.error(`[Provider]   Stack: ${err.stack}`);
+
+        const detail = cause.code
+          ? `${cause.code}${cause.address ? ` (${cause.address}:${cause.port})` : ''}`
+          : err.message;
+        res.json({ data: { success: false, message: `Недоступен: ${detail}` } });
+      }
     }
   } else {
     res.json({ data: { success: true, message: 'Локальный провайдер всегда активен' } });

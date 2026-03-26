@@ -2,7 +2,7 @@
   <v-app>
     <v-navigation-drawer v-model="drawerOpen" :permanent="!mobile" :temporary="mobile"
       width="240" color="surface-light">
-      <v-list-item title="GDD Admin" class="pa-3">
+      <v-list-item title="GDD Админ" class="pa-3">
         <template #prepend>
           <v-icon color="primary" size="22">mdi-shield-crown</v-icon>
         </template>
@@ -15,7 +15,7 @@
       <template #append>
         <v-divider />
         <v-list density="compact" nav class="pa-2">
-          <v-list-item href="/api/docs" target="_blank" prepend-icon="mdi-book-open-variant"
+          <v-list-item :href="`${config.apiUrl}/docs`" target="_blank" prepend-icon="mdi-book-open-variant"
             title="API Docs" rounded="lg" class="mb-1" />
           <v-list-item to="/" prepend-icon="mdi-arrow-left" title="На сайт" rounded="lg" />
         </v-list>
@@ -26,7 +26,7 @@
       <v-app-bar-nav-icon size="small" @click="drawerOpen = !drawerOpen" />
       <v-app-bar-title>
         <router-link to="/admin/dashboard" class="text-white text-decoration-none text-body-2 font-weight-bold">
-          GDD Admin
+          GDD Админ
         </router-link>
       </v-app-bar-title>
       <v-spacer />
@@ -89,6 +89,7 @@ import { useDisplay } from 'vuetify';
 import { useAuthStore } from '@/stores/auth.js';
 import { useNotificationStore } from '@/stores/notifications.js';
 import NotificationDropdown from '@/components/notifications/NotificationDropdown.vue';
+import config from '@/config.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -99,15 +100,23 @@ const { mobile } = useDisplay();
 const drawerOpen = ref(true);
 const notifOpen = ref(false);
 
-const navItems = [
-  { path: '/admin/dashboard', icon: 'mdi-view-dashboard', label: 'Дашборд' },
-  { path: '/admin/users', icon: 'mdi-account-group', label: 'Пользователи' },
-  { path: '/admin/tickets', icon: 'mdi-ticket', label: 'Тикеты' },
-  { path: '/admin/topic-groups', icon: 'mdi-folder', label: 'Тематики' },
-  { path: '/admin/custom-fields', icon: 'mdi-form-textbox', label: 'Поля формы' },
-  { path: '/admin/auth', icon: 'mdi-lock', label: 'Авторизация' },
-  { path: '/admin/settings', icon: 'mdi-cog', label: 'Настройки' }
-];
+const navItems = computed(() => {
+  const items = [
+    { path: '/admin/dashboard', icon: 'mdi-view-dashboard', label: 'Дашборд' },
+    { path: '/admin/users', icon: 'mdi-account-group', label: 'Пользователи' },
+    { path: '/admin/tickets', icon: 'mdi-ticket', label: 'Тикеты' },
+  ];
+  if (authStore.knowledgeEnabled) {
+    items.push({ path: '/admin/knowledge', icon: 'mdi-book-open-variant', label: 'База знаний' });
+  }
+  items.push(
+    { path: '/admin/topic-groups', icon: 'mdi-folder', label: 'Тематики' },
+    { path: '/admin/custom-fields', icon: 'mdi-form-textbox', label: 'Поля формы' },
+    { path: '/admin/auth', icon: 'mdi-lock', label: 'Авторизация' },
+    { path: '/admin/settings', icon: 'mdi-cog', label: 'Настройки' }
+  );
+  return items;
+});
 
 const initials = computed(() => {
   if (!authStore.user) return '';

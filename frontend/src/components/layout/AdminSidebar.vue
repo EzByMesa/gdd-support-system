@@ -9,7 +9,7 @@
       </router-link>
     </nav>
     <div class="admin-sidebar__footer">
-      <a class="admin-sidebar__link" href="/api/docs" target="_blank" style="color: var(--color-primary)">
+      <a class="admin-sidebar__link" :href="`${config.apiUrl}/docs`" target="_blank" style="color: var(--color-primary)">
         <span class="admin-sidebar__icon">&#128214;</span>
         API Документация
       </a>
@@ -23,6 +23,7 @@
 
 <script setup>
 import { useRoute } from 'vue-router';
+import config from '@/config.js';
 
 const route = useRoute();
 

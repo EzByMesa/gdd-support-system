@@ -30,6 +30,7 @@ import { ref, onMounted, provide } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth.js';
 import { useNotificationStore } from '@/stores/notifications.js';
+import config from '@/config.js';
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -50,7 +51,7 @@ provide('snackbar', { show: showSnack });
 onMounted(async () => {
   // Проверяем настройку системы
   try {
-    const res = await fetch('/api/setup/status');
+    const res = await fetch(`${config.apiUrl}/setup/status`);
     if (res.ok) {
       const { data } = await res.json();
       if (data.needsSetup) {
@@ -73,9 +74,17 @@ onMounted(async () => {
 
   ready.value = true;
 
-  // Если авторизован — инициализируем уведомления
+  // Если авторизован — инициализируем уведомления + загружаем флаги
   if (authStore.isAuthenticated) {
     await notifStore.init();
+    // Загружаем feature flags
+    try {
+      const res = await fetch(`${config.apiUrl}/auth/providers`);
+      if (res.ok) {
+        const json = await res.json();
+        authStore.knowledgeEnabled = json.knowledgeEnabled === true;
+      }
+    } catch { /* */ }
   }
 
   // Редирект на login НЕ делаем здесь — router guard сам разберётся

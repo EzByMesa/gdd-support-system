@@ -41,7 +41,7 @@ export default (sequelize) => {
   Attachment.associate = (models) => {
     Attachment.belongsTo(models.Ticket, { foreignKey: 'ticketId', onDelete: 'CASCADE' });
     Attachment.belongsTo(models.TicketMessage, { foreignKey: 'messageId', onDelete: 'CASCADE' });
-    Attachment.belongsTo(models.User, { as: 'uploadedBy', foreignKey: 'uploadedById' });
+    Attachment.belongsTo(models.User, { as: 'uploadedBy', foreignKey: { name: 'uploadedById', allowNull: true } });
   };
 
   return Attachment;

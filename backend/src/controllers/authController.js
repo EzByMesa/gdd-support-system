@@ -45,7 +45,8 @@ function userResponse(user) {
     email: user.email,
     displayName: user.displayName,
     role: user.role,
-    isRootAdmin: user.isRootAdmin
+    isRootAdmin: user.isRootAdmin,
+    avatarPath: user.avatarPath || null
   };
 }
 
@@ -78,7 +79,7 @@ export async function login(req, res) {
 
   if (!user.passwordHash) {
     return res.status(401).json({
-      error: { code: 'INVALID_CREDENTIALS', message: 'Для этой учётной записи используйте вход через 1С' }
+      error: { code: 'INVALID_CREDENTIALS', message: 'Неверный логин или пароль' }
     });
   }
 
@@ -229,12 +230,16 @@ export async function me(req, res) {
  * Список активных провайдеров авторизации (для UI)
  */
 export async function getProviders(req, res) {
-  const { AuthProvider } = getModels();
+  const { AuthProvider, SystemSettings } = getModels();
 
   const providers = await AuthProvider.findAll({
     where: { isActive: true },
     attributes: ['id', 'type', 'name']
   });
+
+  // Статус самостоятельной регистрации
+  const regSetting = await SystemSettings.findOne({ where: { key: 'registration.enabled' } });
+  const registrationEnabled = regSetting ? regSetting.value !== false : true;
 
   // Всегда добавляем LOCAL
   const result = [{ type: 'LOCAL', name: 'Логин и пароль' }];
@@ -245,5 +250,9 @@ export async function getProviders(req, res) {
     }
   }
 
-  res.json({ data: result });
+  // База знаний
+  const kbSetting = await SystemSettings.findOne({ where: { key: 'knowledge.enabled' } });
+  const knowledgeEnabled = kbSetting ? kbSetting.value !== false : false; // по умолчанию выключена
+
+  res.json({ data: result, registrationEnabled, knowledgeEnabled });
 }

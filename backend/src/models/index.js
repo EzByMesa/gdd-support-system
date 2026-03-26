@@ -14,6 +14,8 @@ import SetupStateModel from './SetupState.js';
 import CustomFieldModel from './CustomField.js';
 import NotificationPreferenceModel from './NotificationPreference.js';
 import EmailVerificationModel from './EmailVerification.js';
+import TicketReadStatusModel from './TicketReadStatus.js';
+import KnowledgeArticleModel from './KnowledgeArticle.js';
 
 let sequelize = null;
 let models = {};
@@ -63,7 +65,9 @@ export function initDatabase(connectionString, opts = {}) {
     SetupState: SetupStateModel(sequelize),
     CustomField: CustomFieldModel(sequelize),
     NotificationPreference: NotificationPreferenceModel(sequelize),
-    EmailVerification: EmailVerificationModel(sequelize)
+    EmailVerification: EmailVerificationModel(sequelize),
+    TicketReadStatus: TicketReadStatusModel(sequelize),
+    KnowledgeArticle: KnowledgeArticleModel(sequelize)
   };
 
   // Установить связи

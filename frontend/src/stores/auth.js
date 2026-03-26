@@ -1,13 +1,17 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { api } from '@/services/api.js';
+import { useNotificationStore } from './notifications.js';
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref(null);
+  const knowledgeEnabled = ref(false);
 
   const isAuthenticated = computed(() => !!user.value);
   const isAdmin = computed(() => user.value?.role === 'ADMIN');
+  const isSeniorAgent = computed(() => user.value?.role === 'SENIOR_AGENT');
   const isAgent = computed(() => user.value?.role === 'AGENT');
+  const isStaff = computed(() => ['AGENT', 'SENIOR_AGENT', 'ADMIN'].includes(user.value?.role));
 
   /**
    * Попытка восстановить сессию через refresh cookie.
@@ -43,8 +47,13 @@ export const useAuthStore = defineStore('auth', () => {
     return user.value;
   }
 
-  async function loginOneC(login, password) {
-    const data = await api.post('/auth/1c', { login, password });
+  async function fetchOneCProfile(login, password) {
+    const data = await api.post('/auth/1c/profile', { login, password });
+    return data.data;
+  }
+
+  async function registerOneC(login, password) {
+    const data = await api.post('/auth/register/1c', { login, password });
     api.setToken(data.accessToken);
     user.value = data.user;
     return user.value;
@@ -52,6 +61,9 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function logout() {
     try { await api.post('/auth/logout'); } catch { /* OK */ }
+    // Уничтожаем WS-подключение уведомлений (чтобы не получать чужие)
+    const notifStore = useNotificationStore();
+    notifStore.destroy();
     api.clearToken();
     user.value = null;
   }
@@ -63,5 +75,5 @@ export const useAuthStore = defineStore('auth', () => {
     // Не трогаем user.value — пусть router guard решает
   };
 
-  return { user, isAuthenticated, isAdmin, isAgent, tryRestore, login, register, loginOneC, logout };
+  return { user, knowledgeEnabled, isAuthenticated, isAdmin, isSeniorAgent, isAgent, isStaff, tryRestore, login, register, fetchOneCProfile, registerOneC, logout };
 });

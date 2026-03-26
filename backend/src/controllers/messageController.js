@@ -1,6 +1,5 @@
 import { getModels } from '../models/index.js';
 import { Role } from '../models/enums.js';
-import { getOrCreateAlias } from '../services/agentAlias.js';
 
 /**
  * GET /api/tickets/:id/messages
@@ -32,52 +31,33 @@ export async function listMessages(req, res) {
     offset
   });
 
-  // Анонимизация для USER
-  const messages = await Promise.all(rows.map(async (msg) => {
-    const author = msg.author;
-    const attachments = (msg.Attachments || []).map(a => ({
-      id: a.id, originalName: a.originalName, mimeType: a.mimeType, size: a.size
-    }));
-
-    const isAgentAuthor = author.role === Role.AGENT || author.role === Role.ADMIN;
-
-    if (req.user.role === Role.USER && isAgentAuthor) {
-      const alias = await getOrCreateAlias(author.id, ticketId);
+  const messages = rows.map(msg => {
+    if (msg.isSystem) {
       return {
-        id: msg.id,
-        content: msg.content,
-        author: { id: 'agent', displayName: alias, role: 'AGENT' },
-        attachments,
-        createdAt: msg.createdAt
+        id: msg.id, content: msg.content, isSystem: true,
+        author: { id: null, displayName: 'Система' },
+        attachments: [], createdAt: msg.createdAt
       };
-    }
-
-    let alias = null;
-    if (isAgentAuthor) {
-      alias = await getOrCreateAlias(author.id, ticketId);
     }
 
     return {
       id: msg.id,
       content: msg.content,
-      author: {
-        id: author.id,
-        displayName: author.displayName,
-        role: author.role,
-        alias
-      },
-      attachments,
+      author: msg.author
+        ? { id: msg.author.id, displayName: msg.author.displayName, role: msg.author.role }
+        : { id: null, displayName: 'Удалённый пользователь', role: 'USER' },
+      attachments: (msg.Attachments || []).map(a => ({
+        id: a.id, originalName: a.originalName, mimeType: a.mimeType, size: a.size
+      })),
       createdAt: msg.createdAt
     };
-  }));
+  });
 
   res.json({
     data: messages,
     pagination: {
-      page: parseInt(page),
-      limit: parseInt(limit),
-      total: count,
-      totalPages: Math.ceil(count / parseInt(limit))
+      page: parseInt(page), limit: parseInt(limit),
+      total: count, totalPages: Math.ceil(count / parseInt(limit))
     }
   });
 }

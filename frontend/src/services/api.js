@@ -3,10 +3,12 @@
  * Access token сохраняется в sessionStorage для переживания F5.
  * Refresh token в httpOnly cookie — автоматически обновляется.
  */
+import config from '@/config.js';
+
 const TOKEN_KEY = 'gdd_access_token';
 
 class ApiService {
-  constructor(baseUrl = '/api') {
+  constructor(baseUrl = config.apiUrl) {
     this.baseUrl = baseUrl;
     this.accessToken = sessionStorage.getItem(TOKEN_KEY) || null;
     this.onUnauthorized = null;

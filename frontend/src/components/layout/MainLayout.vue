@@ -6,7 +6,8 @@
 
       <router-link to="/" class="d-flex align-center text-decoration-none ml-2" style="gap: 6px">
         <v-icon color="white" size="20">mdi-headset</v-icon>
-        <span class="font-weight-bold text-white text-body-2">GDD</span>
+        <span class="font-weight-bold text-white text-body-2 d-none d-sm-inline">GDD Служба поддержки</span>
+        <span class="font-weight-bold text-white text-body-2 d-inline d-sm-none">Поддержка</span>
       </router-link>
 
       <v-spacer />
@@ -16,7 +17,10 @@
         <v-btn variant="text" color="white" to="/" size="small" class="text-none">
           Обращения
         </v-btn>
-        <v-btn v-if="authStore.isAgent || authStore.isAdmin"
+        <v-btn v-if="authStore.knowledgeEnabled" variant="text" color="white" to="/knowledge" size="small" class="text-none">
+          База знаний
+        </v-btn>
+        <v-btn v-if="authStore.isStaff"
           variant="text" color="white" to="/delegations" size="small" class="text-none">
           <v-badge v-if="delegCount > 0" :content="delegCount" color="warning" floating dot>
             <span>Делегирование</span>
@@ -45,9 +49,8 @@
       <v-menu v-if="authStore.user" location="bottom end">
         <template #activator="{ props }">
           <v-btn v-bind="props" variant="text" size="small" class="text-none ml-1" rounded="xl">
-            <v-avatar size="26" :color="avatarColor">
-              <span class="text-caption font-weight-bold" style="color: #121318">{{ initials }}</span>
-            </v-avatar>
+            <RoleAvatar :size="26" :role="authStore.user?.role" :name="authStore.user?.displayName"
+              :src="authStore.user?.avatarPath" />
             <v-icon size="14" class="ml-1" color="white">mdi-chevron-down</v-icon>
           </v-btn>
         </template>
@@ -69,10 +72,11 @@
     <v-navigation-drawer v-model="mobileDrawer" temporary width="260" color="surface">
       <v-list density="compact" nav class="pa-2">
         <v-list-item to="/" prepend-icon="mdi-ticket-outline" title="Обращения" />
+        <v-list-item v-if="authStore.knowledgeEnabled" to="/knowledge" prepend-icon="mdi-book-open-variant" title="База знаний" />
         <v-list-item to="/tickets/new" prepend-icon="mdi-plus" title="Новое обращение" />
-        <v-list-item v-if="authStore.isAgent || authStore.isAdmin"
+        <v-list-item v-if="authStore.isStaff"
           to="/delegations" prepend-icon="mdi-swap-horizontal" title="Делегирование" />
-        <v-list-item v-if="authStore.isAgent || authStore.isAdmin"
+        <v-list-item v-if="authStore.isStaff"
           to="/topic-groups" prepend-icon="mdi-folder-multiple" title="Тематики" />
         <v-divider class="my-1" />
         <v-list-item to="/profile" prepend-icon="mdi-account-cog" title="Личный кабинет" />
@@ -106,13 +110,14 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useDisplay } from 'vuetify';
 import { useAuthStore } from '@/stores/auth.js';
 import { useNotificationStore } from '@/stores/notifications.js';
 import { api } from '@/services/api.js';
 import NotificationDropdown from '@/components/notifications/NotificationDropdown.vue';
+import RoleAvatar from '@/components/ui/RoleAvatar.vue';
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -128,7 +133,7 @@ const initials = computed(() => {
   return authStore.user.displayName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
 });
 
-const roleLabels = { USER: 'Пользователь', AGENT: 'Агент', ADMIN: 'Администратор' };
+const roleLabels = { USER: 'Пользователь', AGENT: 'Агент', SENIOR_AGENT: 'Старший агент', ADMIN: 'Администратор' };
 const roleLabel = computed(() => roleLabels[authStore.user?.role] || '');
 const avatarColor = computed(() => {
   const colors = ['#8B9DC3', '#B09AC5', '#7EA87E', '#C9A96E', '#BF7B7B', '#7E9BB5'];
@@ -141,8 +146,13 @@ async function handleLogout() {
   router.push('/login');
 }
 
+// При обновлении профиля (WS) — перечитываем данные пользователя
+watch(() => notifStore.profileUpdatedAt, (val) => {
+  if (val) authStore.tryRestore();
+});
+
 onMounted(async () => {
-  if ((authStore.isAgent || authStore.isAdmin) && api.accessToken) {
+  if ((authStore.isStaff) && api.accessToken) {
     try {
       const res = await api.get('/delegations/incoming/count');
       delegCount.value = res.data?.count || 0;

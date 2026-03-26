@@ -27,26 +27,40 @@ const routes = [
     path: '/',
     name: 'tickets',
     component: () => import('@/pages/TicketsPage.vue'),
-    meta: { roles: ['USER', 'AGENT', 'ADMIN'] }
+    meta: { roles: ['USER', 'AGENT', 'SENIOR_AGENT', 'ADMIN'] }
   },
   {
     path: '/tickets/new',
     name: 'new-ticket',
     component: () => import('@/pages/NewTicketPage.vue'),
-    meta: { roles: ['USER', 'AGENT', 'ADMIN'] }
+    meta: { roles: ['USER', 'AGENT', 'SENIOR_AGENT', 'ADMIN'] }
   },
   {
     path: '/tickets/:id',
     name: 'ticket-detail',
     component: () => import('@/pages/TicketDetailPage.vue'),
-    meta: { roles: ['USER', 'AGENT', 'ADMIN'] }
+    meta: { roles: ['USER', 'AGENT', 'SENIOR_AGENT', 'ADMIN'] }
   },
 
   {
     path: '/profile',
     name: 'profile',
     component: () => import('@/pages/ProfilePage.vue'),
-    meta: { roles: ['USER', 'AGENT', 'ADMIN'] }
+    meta: { roles: ['USER', 'AGENT', 'SENIOR_AGENT', 'ADMIN'] }
+  },
+
+  // Knowledge base
+  {
+    path: '/knowledge',
+    name: 'knowledge',
+    component: () => import('@/pages/KnowledgePage.vue'),
+    meta: { roles: ['USER', 'AGENT', 'SENIOR_AGENT', 'ADMIN'] }
+  },
+  {
+    path: '/knowledge/:id',
+    name: 'knowledge-article',
+    component: () => import('@/pages/KnowledgeArticlePage.vue'),
+    meta: { roles: ['USER', 'AGENT', 'SENIOR_AGENT', 'ADMIN'] }
   },
 
   // Agent
@@ -54,13 +68,13 @@ const routes = [
     path: '/delegations',
     name: 'delegations',
     component: () => import('@/pages/DelegationsPage.vue'),
-    meta: { roles: ['AGENT', 'ADMIN'] }
+    meta: { roles: ['AGENT', 'SENIOR_AGENT', 'ADMIN'] }
   },
   {
     path: '/topic-groups',
     name: 'topic-groups',
     component: () => import('@/pages/TopicGroupsPage.vue'),
-    meta: { roles: ['AGENT', 'ADMIN'] }
+    meta: { roles: ['AGENT', 'SENIOR_AGENT', 'ADMIN'] }
   },
 
   // Admin
@@ -102,6 +116,12 @@ const routes = [
     path: '/admin/custom-fields',
     name: 'admin-custom-fields',
     component: () => import('@/pages/admin/AdminCustomFieldsPage.vue'),
+    meta: { roles: ['ADMIN'], admin: true }
+  },
+  {
+    path: '/admin/knowledge',
+    name: 'admin-knowledge',
+    component: () => import('@/pages/admin/AdminKnowledgePage.vue'),
     meta: { roles: ['ADMIN'], admin: true }
   },
   {

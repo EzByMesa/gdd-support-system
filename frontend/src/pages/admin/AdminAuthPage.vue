@@ -3,7 +3,7 @@
     <v-container fluid>
       <div class="d-flex align-center justify-space-between mb-6">
         <div class="text-h5 font-weight-bold">Авторизация</div>
-        <v-btn color="primary" prepend-icon="mdi-plus" @click="showAddModal = true">
+        <v-btn color="primary" prepend-icon="mdi-plus" @click="openModal(null)">
           Добавить провайдер
         </v-btn>
       </div>
@@ -37,105 +37,177 @@
       </v-alert>
 
       <div v-else class="d-flex flex-column" style="gap: 8px">
-        <v-card v-for="p in providers" :key="p.id" variant="outlined">
+        <v-card v-for="p in providers" :key="p.id" variant="outlined" @click="openModal(p)" style="cursor: pointer">
           <v-card-text class="d-flex align-center justify-space-between">
             <div class="d-flex align-center" style="gap: 12px">
-              <v-avatar color="primary" size="40" variant="tonal">
-                <span class="font-weight-bold">{{ p.type === 'ONE_C' ? '1С' : '' }}</span>
-                <v-icon v-if="p.type !== 'ONE_C'" icon="mdi-lock-outline" />
+              <v-avatar :color="p.type === 'ONE_C' ? 'primary' : 'grey'" size="40" variant="tonal">
+                <v-icon :icon="p.type === 'ONE_C' ? 'mdi-cog' : 'mdi-lock-outline'" />
               </v-avatar>
               <div>
                 <div class="font-weight-medium">{{ p.name }}</div>
                 <div class="text-caption text-medium-emphasis">
-                  {{ p.type === 'ONE_C' ? '1С:Предприятие' : 'Локальный' }}
+                  {{ p.type === 'ONE_C' ? 'СервисДеск' : 'Локальный' }}
                 </div>
               </div>
             </div>
 
             <div class="d-flex align-center" style="gap: 8px">
               <v-btn
-                v-if="p.type === 'ONE_C'"
-                variant="outlined"
-                size="small"
-                prepend-icon="mdi-connection"
-                @click="testProvider(p.id)"
-              >
-                Тест
-              </v-btn>
-              <v-btn
                 :icon="p.isActive ? 'mdi-toggle-switch' : 'mdi-toggle-switch-off-outline'"
                 :color="p.isActive ? 'success' : 'grey'"
                 variant="text"
                 size="small"
                 :title="p.isActive ? 'Отключить' : 'Включить'"
-                @click="toggleProvider(p)"
+                @click.stop="toggleProvider(p)"
+              />
+              <v-btn
+                icon="mdi-pencil-outline"
+                variant="text"
+                size="small"
+                title="Редактировать"
+                @click.stop="openModal(p)"
               />
               <v-btn
                 icon="mdi-delete-outline"
                 color="error"
                 variant="text"
                 size="small"
-                @click="deleteProvider(p)"
+                @click.stop="deleteProvider(p)"
               />
             </div>
           </v-card-text>
         </v-card>
       </div>
 
-      <!-- Add Provider Dialog -->
-      <v-dialog v-model="showAddModal" max-width="550" persistent>
+      <!-- Add / Edit Provider Dialog -->
+      <v-dialog v-model="showModal" max-width="580" persistent>
         <v-card>
-          <v-card-title class="text-h6">Добавить провайдер</v-card-title>
+          <v-card-title class="text-h6">
+            {{ isEditing ? 'Редактировать провайдер' : 'Добавить провайдер' }}
+          </v-card-title>
           <v-card-text>
             <div class="d-flex flex-column" style="gap: 16px">
               <v-select
-                v-model="addForm.type"
-                :items="[{ value: 'ONE_C', title: '1С:Предприятие' }]"
+                v-model="modalForm.type"
+                :items="[{ value: 'ONE_C', title: 'СервисДеск' }]"
                 item-title="title"
                 item-value="value"
                 label="Тип"
                 variant="outlined"
                 density="compact"
+                :disabled="isEditing"
               />
               <v-text-field
-                v-model="addForm.name"
+                v-model="modalForm.name"
                 label="Название"
                 variant="outlined"
                 density="compact"
                 :rules="[v => !!v || 'Обязательное поле']"
+                @update:model-value="onConfigChanged"
               />
 
               <v-divider />
 
-              <div class="text-subtitle-2 font-weight-bold">Настройки подключения к 1С</div>
+              <div class="text-subtitle-2 font-weight-bold">Настройки подключения</div>
 
               <v-text-field
-                v-model="addForm.baseUrl"
-                label="URL сервера 1С"
-                placeholder="http://1c-server:8080/erp"
+                v-model="modalForm.baseUrl"
+                label="URL сервера"
+                placeholder="http://server:8080/endpoint"
                 variant="outlined"
                 density="compact"
                 :rules="[v => !!v || 'Обязательное поле']"
+                @update:model-value="onConfigChanged"
               />
               <v-text-field
-                v-model="addForm.endpoint"
+                v-model="modalForm.endpoint"
                 label="Эндпоинт авторизации"
                 variant="outlined"
                 density="compact"
+                @update:model-value="onConfigChanged"
               />
               <v-text-field
-                v-model="addForm.timeout"
+                v-model="modalForm.timeout"
                 label="Таймаут (мс)"
                 type="number"
                 variant="outlined"
                 density="compact"
+                @update:model-value="onConfigChanged"
               />
+
+              <v-divider />
+
+              <!-- Inline test -->
+              <div class="text-subtitle-2 font-weight-bold">Тест подключения</div>
+              <p class="text-caption text-medium-emphasis" style="margin-top: -8px">
+                Для сохранения необходимо пройти успешный тест
+              </p>
+
+              <v-text-field
+                v-model="testForm.login"
+                label="Логин"
+                prepend-inner-icon="mdi-account"
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
+              <v-text-field
+                v-model="testForm.password"
+                label="Пароль"
+                prepend-inner-icon="mdi-lock"
+                variant="outlined"
+                density="compact"
+                :type="showTestPassword ? 'text' : 'password'"
+                :append-inner-icon="showTestPassword ? 'mdi-eye-off' : 'mdi-eye'"
+                hide-details
+                @click:append-inner="showTestPassword = !showTestPassword"
+              />
+
+              <v-btn
+                variant="outlined"
+                color="primary"
+                :loading="testLoading"
+                :disabled="!testForm.login || !testForm.password || !modalForm.baseUrl"
+                prepend-icon="mdi-connection"
+                @click="runInlineTest"
+              >
+                Проверить подключение
+              </v-btn>
+
+              <!-- Test result -->
+              <v-alert
+                v-if="testResult"
+                :type="testResult.success ? 'success' : 'error'"
+                variant="tonal"
+                density="compact"
+              >
+                <div class="font-weight-medium">{{ testResult.message }}</div>
+                <div v-if="testResult.status" class="text-caption mt-1">
+                  HTTP {{ testResult.status }}
+                </div>
+              </v-alert>
+
+              <!-- JSON response preview -->
+              <v-expansion-panels v-if="testResult?.response" variant="accordion">
+                <v-expansion-panel title="Ответ сервера (JSON)">
+                  <v-expansion-panel-text>
+                    <pre class="text-caption" style="overflow-x: auto; white-space: pre-wrap">{{ JSON.stringify(testResult.response, null, 2) }}</pre>
+                  </v-expansion-panel-text>
+                </v-expansion-panel>
+              </v-expansion-panels>
             </div>
           </v-card-text>
           <v-card-actions class="px-4 pb-4">
             <v-spacer />
-            <v-btn variant="text" @click="showAddModal = false">Отмена</v-btn>
-            <v-btn color="primary" :loading="addLoading" @click="addProvider">Добавить</v-btn>
+            <v-btn variant="text" @click="showModal = false">Отмена</v-btn>
+            <v-btn
+              color="primary"
+              :loading="saveLoading"
+              :disabled="!testPassed"
+              @click="saveProvider"
+            >
+              {{ isEditing ? 'Сохранить' : 'Добавить' }}
+            </v-btn>
           </v-card-actions>
         </v-card>
       </v-dialog>
@@ -144,19 +216,63 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted } from 'vue';
 import { api } from '@/services/api.js';
 import { toast } from '@/composables/useToast.js';
 import AdminLayout from '@/components/layout/AdminLayout.vue';
 
 const providers = ref([]);
 const regEnabled = ref(true);
-const showAddModal = ref(false);
-const addLoading = ref(false);
 
-const addForm = reactive({
-  type: 'ONE_C', name: '1С:Предприятие', baseUrl: '', endpoint: '/auth/validate', timeout: '5000'
+// Modal state
+const showModal = ref(false);
+const editingId = ref(null);
+const isEditing = computed(() => !!editingId.value);
+const saveLoading = ref(false);
+const testPassed = ref(false);
+
+const modalForm = reactive({
+  type: 'ONE_C', name: 'СервисДеск', baseUrl: '', endpoint: '/auth/validate', timeout: '5000'
 });
+
+// Inline test
+const showTestPassword = ref(false);
+const testLoading = ref(false);
+const testResult = ref(null);
+const testForm = reactive({ login: '', password: '' });
+
+function resetModal() {
+  modalForm.type = 'ONE_C';
+  modalForm.name = 'СервисДеск';
+  modalForm.baseUrl = '';
+  modalForm.endpoint = '/auth/validate';
+  modalForm.timeout = '5000';
+  testForm.login = '';
+  testForm.password = '';
+  testResult.value = null;
+  testPassed.value = false;
+  showTestPassword.value = false;
+  editingId.value = null;
+}
+
+function openModal(provider) {
+  resetModal();
+  if (provider) {
+    editingId.value = provider.id;
+    modalForm.type = provider.type;
+    modalForm.name = provider.name;
+    modalForm.baseUrl = provider.config?.baseUrl || '';
+    modalForm.endpoint = provider.config?.authEndpoint || '/auth/validate';
+    modalForm.timeout = String(provider.config?.timeout || 5000);
+  }
+  showModal.value = true;
+}
+
+function onConfigChanged() {
+  // Сброс теста при изменении настроек подключения
+  testPassed.value = false;
+  testResult.value = null;
+}
 
 async function load() {
   try {
@@ -175,10 +291,88 @@ async function toggleRegistration() {
   toast.success(regEnabled.value ? 'Регистрация включена' : 'Регистрация отключена');
 }
 
-async function testProvider(id) {
-  const res = await api.post(`/admin/auth-providers/${id}/test`);
-  if (res.data.success) toast.success(res.data.message);
-  else toast.error(res.data.message);
+async function runInlineTest() {
+  testLoading.value = true;
+  testResult.value = null;
+  testPassed.value = false;
+
+  // Для inline-теста: если провайдер ещё не создан, тестируем напрямую через временный endpoint
+  // Если редактируем существующий — используем его id
+  try {
+    if (isEditing.value) {
+      // Сначала сохраняем config без коммита (через PUT), потом тестируем
+      await api.put(`/admin/auth-providers/${editingId.value}`, {
+        name: modalForm.name,
+        config: {
+          baseUrl: modalForm.baseUrl,
+          authEndpoint: modalForm.endpoint,
+          timeout: parseInt(modalForm.timeout) || 5000,
+          defaultRole: 'USER'
+        }
+      });
+      const res = await api.post(`/admin/auth-providers/${editingId.value}/test`, {
+        login: testForm.login,
+        password: testForm.password
+      });
+      testResult.value = res.data;
+    } else {
+      // Для нового провайдера: создаём неактивным, тестируем, если не прошёл — удаляем
+      const created = await api.post('/admin/auth-providers', {
+        type: 'ONE_C',
+        name: modalForm.name,
+        isActive: false,
+        config: {
+          baseUrl: modalForm.baseUrl,
+          authEndpoint: modalForm.endpoint,
+          timeout: parseInt(modalForm.timeout) || 5000,
+          defaultRole: 'USER'
+        }
+      });
+      const tempId = created.data.id;
+      editingId.value = tempId; // теперь работаем как с существующим
+
+      const res = await api.post(`/admin/auth-providers/${tempId}/test`, {
+        login: testForm.login,
+        password: testForm.password
+      });
+      testResult.value = res.data;
+
+      if (!res.data.success) {
+        // Тест не прошёл — удаляем временный провайдер
+        await api.delete(`/admin/auth-providers/${tempId}`);
+        editingId.value = null;
+      }
+    }
+
+    testPassed.value = !!testResult.value?.success;
+  } catch (err) {
+    testResult.value = { success: false, message: err.message };
+    testPassed.value = false;
+  }
+  testLoading.value = false;
+}
+
+async function saveProvider() {
+  saveLoading.value = true;
+  try {
+    // Провайдер уже существует (создан при тесте или редактируется)
+    await api.put(`/admin/auth-providers/${editingId.value}`, {
+      name: modalForm.name,
+      isActive: true,
+      config: {
+        baseUrl: modalForm.baseUrl,
+        authEndpoint: modalForm.endpoint,
+        timeout: parseInt(modalForm.timeout) || 5000,
+        defaultRole: 'USER'
+      }
+    });
+    toast.success(isEditing.value ? 'Провайдер сохранён' : 'Провайдер добавлен');
+    showModal.value = false;
+    await load();
+  } catch (err) {
+    toast.error(err.message);
+  }
+  saveLoading.value = false;
 }
 
 async function toggleProvider(p) {
@@ -193,28 +387,6 @@ async function deleteProvider(p) {
     toast.success('Удалён');
     await load();
   }
-}
-
-async function addProvider() {
-  addLoading.value = true;
-  try {
-    await api.post('/admin/auth-providers', {
-      type: 'ONE_C',
-      name: addForm.name,
-      config: {
-        baseUrl: addForm.baseUrl,
-        authEndpoint: addForm.endpoint,
-        timeout: parseInt(addForm.timeout) || 5000,
-        defaultRole: 'USER'
-      }
-    });
-    toast.success('Провайдер добавлен');
-    showAddModal.value = false;
-    await load();
-  } catch (err) {
-    toast.error(err.message);
-  }
-  addLoading.value = false;
 }
 
 onMounted(load);

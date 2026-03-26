@@ -26,6 +26,11 @@ class PushService {
     if (this._initDone || !this.supported) return;
     this._initDone = true;
 
+    // В dev-режиме с самоподписанным сертификатом SW не работает — пропускаем молча
+    if (location.protocol === 'https:' && import.meta.env.DEV) {
+      return;
+    }
+
     try {
       this.registration = await navigator.serviceWorker.register('/sw.js');
       await navigator.serviceWorker.ready;
@@ -33,9 +38,8 @@ class PushService {
       if (this.subscription) {
         await this._syncSubscription(this.subscription);
       }
-      console.log('[Push] SW зарегистрирован, подписка:', !!this.subscription);
-    } catch (err) {
-      console.error('[Push] Ошибка инициализации:', err);
+    } catch {
+      // SSL / сетевая ошибка — push-уведомления недоступны, работаем без них
     }
   }
 

@@ -1,9 +1,12 @@
 <template>
   <div style="overflow-y: auto; flex: 1">
-    <!-- Mark all read -->
-    <div v-if="notifications.length > 0" class="d-flex justify-end px-3 py-1">
+    <!-- Actions bar -->
+    <div v-if="notifications.length > 0" class="d-flex justify-space-between align-center px-3 py-1">
       <v-btn variant="text" size="x-small" color="primary" @click="markAllRead">
         Прочитать все
+      </v-btn>
+      <v-btn variant="text" size="x-small" color="error" @click="handleDeleteAll">
+        Очистить все
       </v-btn>
     </div>
 
@@ -25,6 +28,11 @@
           {{ n.title }}
         </v-list-item-title>
         <v-list-item-subtitle class="text-caption">{{ n.body }}</v-list-item-subtitle>
+        <template #append>
+          <v-btn icon variant="text" size="x-small" color="grey" @click.stop="handleDelete(n)">
+            <v-icon size="14">mdi-close</v-icon>
+          </v-btn>
+        </template>
       </v-list-item>
     </v-list>
   </div>
@@ -43,16 +51,16 @@ const loading = ref(true);
 const notifications = ref([]);
 
 const iconMap = {
-  NEW_MESSAGE: 'mdi-chat', STATUS_CHANGED: 'mdi-swap-vertical',
-  TICKET_ASSIGNED: 'mdi-account-check', DELEGATION_REQUEST: 'mdi-swap-horizontal',
-  DELEGATION_ACCEPTED: 'mdi-check', DELEGATION_REJECTED: 'mdi-close',
-  AGENT_CHANGED: 'mdi-account-switch'
+  NEW_TICKET: 'mdi-ticket-outline', NEW_MESSAGE: 'mdi-chat',
+  STATUS_CHANGED: 'mdi-swap-vertical', TICKET_ASSIGNED: 'mdi-account-check',
+  DELEGATION_REQUEST: 'mdi-swap-horizontal', DELEGATION_ACCEPTED: 'mdi-check',
+  DELEGATION_REJECTED: 'mdi-close', AGENT_CHANGED: 'mdi-account-switch'
 };
 const colorMap = {
-  NEW_MESSAGE: 'info', STATUS_CHANGED: 'warning',
-  TICKET_ASSIGNED: 'success', DELEGATION_REQUEST: 'primary',
-  DELEGATION_ACCEPTED: 'success', DELEGATION_REJECTED: 'error',
-  AGENT_CHANGED: 'info'
+  NEW_TICKET: 'primary', NEW_MESSAGE: 'info',
+  STATUS_CHANGED: 'warning', TICKET_ASSIGNED: 'success',
+  DELEGATION_REQUEST: 'primary', DELEGATION_ACCEPTED: 'success',
+  DELEGATION_REJECTED: 'error', AGENT_CHANGED: 'info'
 };
 
 function typeIcon(t) { return iconMap[t] || 'mdi-bell'; }
@@ -67,6 +75,17 @@ async function handleClick(n) {
 async function markAllRead() {
   await notifStore.markAllRead();
   notifications.value.forEach(n => n.isRead = true);
+}
+
+async function handleDelete(n) {
+  await notifStore.deleteOne(n.id);
+  notifications.value = notifications.value.filter(x => x.id !== n.id);
+}
+
+async function handleDeleteAll() {
+  if (!confirm('Удалить все уведомления?')) return;
+  await notifStore.deleteAll();
+  notifications.value = [];
 }
 
 onMounted(async () => {

@@ -1,7 +1,6 @@
 import { getModels } from '../models/index.js';
 import { DelegationStatus, Role, TicketStatus } from '../models/enums.js';
-import { getOrCreateAlias } from '../services/agentAlias.js';
-import { sendToUser, broadcastToRoomAnonymized } from '../websocket/wsServer.js';
+import { sendToUser, broadcastToRoom } from '../websocket/wsServer.js';
 
 /**
  * POST /api/tickets/:id/delegate
@@ -131,8 +130,7 @@ export async function respondDelegation(req, res) {
     ticket.assigneeId = delegation.toAgentId;
     await ticket.save();
 
-    // Новый псевдоним
-    const newAlias = await getOrCreateAlias(delegation.toAgentId, ticket.id);
+    const newAgentName = delegation.toAgent.displayName;
 
     // Уведомление пользователю (автору тикета)
     sendToUser(ticket.authorId, {
@@ -140,16 +138,21 @@ export async function respondDelegation(req, res) {
       data: {
         type: 'AGENT_CHANGED',
         title: `Обращение #${ticket.number}`,
-        body: `Теперь вашим обращением занимается ${newAlias}`,
+        body: `Теперь вашим обращением занимается ${newAgentName}`,
         data: { ticketId: ticket.id }
       }
     });
 
     // WS broadcast в комнату тикета
-    broadcastToRoomAnonymized(ticket.id,
-      { type: 'agent_changed', data: { newAgent: newAlias } },
-      { type: 'agent_changed', data: { newAgent: delegation.toAgent.displayName, newAgentAlias: newAlias } }
-    );
+    broadcastToRoom(ticket.id, {
+      type: 'agent_changed',
+      data: { newAgent: newAgentName }
+    });
+
+    // tickets_updated для всех участников
+    sendToUser(ticket.authorId, { type: 'tickets_updated' });
+    sendToUser(delegation.fromAgentId, { type: 'tickets_updated' });
+    sendToUser(delegation.toAgentId, { type: 'tickets_updated' });
 
     // Уведомление бывшему агенту
     sendToUser(delegation.fromAgentId, {

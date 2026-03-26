@@ -40,6 +40,11 @@ export default (sequelize) => {
       type: DataTypes.JSON,
       allowNull: true,
       defaultValue: null
+    },
+    createdById: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      comment: 'ID агента/админа, создавшего тикет от имени пользователя'
     }
   }, {
     tableName: 'tickets',
@@ -61,8 +66,9 @@ export default (sequelize) => {
   });
 
   Ticket.associate = (models) => {
-    Ticket.belongsTo(models.User, { as: 'author', foreignKey: 'authorId' });
-    Ticket.belongsTo(models.User, { as: 'assignee', foreignKey: 'assigneeId' });
+    Ticket.belongsTo(models.User, { as: 'author', foreignKey: { name: 'authorId', allowNull: true } });
+    Ticket.belongsTo(models.User, { as: 'assignee', foreignKey: { name: 'assigneeId', allowNull: true } });
+    Ticket.belongsTo(models.User, { as: 'createdBy', foreignKey: { name: 'createdById', allowNull: true } });
     Ticket.belongsTo(models.TopicGroup, { foreignKey: 'topicGroupId' });
     Ticket.hasMany(models.TicketMessage, { foreignKey: 'ticketId' });
     Ticket.hasMany(models.Attachment, { foreignKey: 'ticketId' });

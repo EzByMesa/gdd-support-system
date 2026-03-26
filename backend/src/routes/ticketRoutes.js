@@ -3,7 +3,7 @@ import multer from 'multer';
 import { authenticate, authorize } from '../middleware/auth.js';
 import {
   createTicket, listTickets, getTicket, updateTicket,
-  updateStatus, assignTicket, updatePriority, closeTicket
+  updateStatus, assignTicket, updatePriority, closeTicket, markTicketRead
 } from '../controllers/ticketController.js';
 import {
   uploadAttachment, getAttachment, downloadAttachment, deleteAttachment
@@ -35,16 +35,17 @@ router.post('/', authenticate, asyncHandler(createTicket));
 router.get('/', authenticate, asyncHandler(listTickets));
 router.get('/:id', authenticate, asyncHandler(getTicket));
 router.put('/:id', authenticate, asyncHandler(updateTicket));
-router.put('/:id/status', authenticate, authorize('AGENT', 'ADMIN'), asyncHandler(updateStatus));
-router.put('/:id/assign', authenticate, authorize('AGENT', 'ADMIN'), asyncHandler(assignTicket));
-router.put('/:id/priority', authenticate, authorize('AGENT', 'ADMIN'), asyncHandler(updatePriority));
+router.put('/:id/status', authenticate, authorize('AGENT', 'SENIOR_AGENT', 'ADMIN'), asyncHandler(updateStatus));
+router.put('/:id/assign', authenticate, authorize('AGENT', 'SENIOR_AGENT', 'ADMIN'), asyncHandler(assignTicket));
+router.put('/:id/priority', authenticate, authorize('AGENT', 'SENIOR_AGENT', 'ADMIN'), asyncHandler(updatePriority));
 router.put('/:id/close', authenticate, asyncHandler(closeTicket));
+router.put('/:id/read', authenticate, asyncHandler(markTicketRead));
 
 // --- Messages ---
 router.get('/:id/messages', authenticate, asyncHandler(listMessages));
 
 // --- Delegation ---
-router.post('/:id/delegate', authenticate, authorize('AGENT', 'ADMIN'), asyncHandler(createDelegation));
+router.post('/:id/delegate', authenticate, authorize('AGENT', 'SENIOR_AGENT', 'ADMIN'), asyncHandler(createDelegation));
 
 export default router;
 

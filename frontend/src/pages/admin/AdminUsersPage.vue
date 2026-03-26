@@ -90,6 +90,15 @@
                 :title="u.isActive ? 'Деактивировать' : 'Активировать'"
                 @click="toggleActive(u.id, !u.isActive)"
               />
+              <v-btn
+                v-if="!u.isRootAdmin"
+                icon="mdi-delete-outline"
+                color="error"
+                variant="text"
+                size="small"
+                title="Удалить"
+                @click="deleteUser(u)"
+              />
             </div>
           </v-card-text>
         </v-card>
@@ -171,17 +180,19 @@ const roleOptions = [
   { value: '', text: 'Все роли' },
   { value: 'USER', text: 'Пользователь' },
   { value: 'AGENT', text: 'Агент' },
+  { value: 'SENIOR_AGENT', text: 'Старший агент' },
   { value: 'ADMIN', text: 'Администратор' }
 ];
 
 const roleSelectItems = [
   { value: 'USER', text: 'Пользователь' },
   { value: 'AGENT', text: 'Агент' },
+  { value: 'SENIOR_AGENT', text: 'Старший агент' },
   { value: 'ADMIN', text: 'Администратор' }
 ];
 
-const roleColors = { ADMIN: 'orange', AGENT: 'blue', USER: 'grey' };
-const roleLabels = { ADMIN: 'Администратор', AGENT: 'Агент', USER: 'Пользователь' };
+const roleColors = { ADMIN: 'orange', SENIOR_AGENT: 'teal', AGENT: 'blue', USER: 'grey' };
+const roleLabels = { ADMIN: 'Администратор', SENIOR_AGENT: 'Старший агент', AGENT: 'Агент', USER: 'Пользователь' };
 
 const createForm = reactive({
   login: '', displayName: '', email: '', password: '', role: 'USER'
@@ -221,6 +232,15 @@ async function toggleActive(userId, isActive) {
   try {
     await api.put(`/admin/users/${userId}/active`, { isActive });
     toast.success(isActive ? 'Активирован' : 'Деактивирован');
+    await load();
+  } catch (err) { toast.error(err.message); }
+}
+
+async function deleteUser(u) {
+  if (!confirm(`Удалить пользователя "${u.displayName}" (@${u.login})?\n\nЭто деактивирует учётную запись.`)) return;
+  try {
+    await api.delete(`/admin/users/${u.id}`);
+    toast.success('Пользователь удалён');
     await load();
   } catch (err) { toast.error(err.message); }
 }

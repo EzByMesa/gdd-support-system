@@ -3,7 +3,7 @@
     <button v-if="showBurger" class="header__burger" @click="$emit('burgerClick')">&equiv;</button>
 
     <router-link class="header__logo" :to="adminMode ? '/admin/dashboard' : '/'">
-      {{ adminMode ? 'GDD Admin' : 'GDD Support' }}
+      {{ adminMode ? 'GDD Админ' : 'GDD Служба поддержки' }}
     </router-link>
 
     <div class="header__actions">

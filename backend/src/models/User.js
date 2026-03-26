@@ -50,6 +50,11 @@ export default (sequelize) => {
       type: DataTypes.STRING,
       allowNull: true,
       defaultValue: null
+    },
+    avatarPath: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      defaultValue: null
     }
   }, {
     tableName: 'users',

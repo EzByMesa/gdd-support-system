@@ -1,28 +1,52 @@
 <template>
-  <AppModal title="Делегировать тикет" @close="$emit('close')">
-    <AppSpinner v-if="loading" />
+  <v-dialog :model-value="true" max-width="480" persistent @update:model-value="$emit('close')">
+    <v-card>
+      <v-card-title class="text-body-1 font-weight-bold">Делегировать тикет</v-card-title>
+      <v-card-text>
+        <div v-if="loading" class="d-flex justify-center py-4">
+          <v-progress-circular indeterminate color="primary" size="32" />
+        </div>
 
-    <template v-else-if="agents.length === 0">
-      <p class="text-muted text-center">Нет доступных агентов для делегирования</p>
-    </template>
+        <v-alert v-else-if="agentOptions.length === 0" type="info" variant="tonal">
+          Нет доступных агентов для делегирования
+        </v-alert>
 
-    <template v-else>
-      <AppSelect v-model="selectedAgent" label="Выберите агента" placeholder="Выберите..."
-        :options="agentOptions" />
-
-      <div class="input-group mt-md">
-        <label>Причина (необязательно)</label>
-        <textarea v-model="reason" class="textarea"
-          placeholder="Почему вы хотите передать этот тикет?" rows="3"></textarea>
-      </div>
-    </template>
-
-    <template #footer>
-      <AppButton text="Отмена" variant="secondary" @click="$emit('close')" />
-      <AppButton v-if="agents.length > 0" text="Отправить запрос"
-        :loading="submitting" @click="submit" />
-    </template>
-  </AppModal>
+        <template v-else>
+          <v-select
+            v-model="selectedAgent"
+            :items="agentOptions"
+            item-title="text"
+            item-value="value"
+            label="Выберите агента"
+            variant="outlined"
+            density="compact"
+            class="mb-3"
+          />
+          <v-textarea
+            v-model="reason"
+            label="Причина (необязательно)"
+            placeholder="Почему вы хотите передать этот тикет?"
+            variant="outlined"
+            density="compact"
+            rows="3"
+          />
+        </template>
+      </v-card-text>
+      <v-card-actions class="px-4 pb-4">
+        <v-spacer />
+        <v-btn variant="text" @click="$emit('close')">Отмена</v-btn>
+        <v-btn
+          v-if="agentOptions.length > 0"
+          color="primary"
+          :loading="submitting"
+          :disabled="!selectedAgent"
+          @click="submit"
+        >
+          Отправить запрос
+        </v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
 </template>
 
 <script setup>
@@ -30,10 +54,6 @@ import { ref, computed, onMounted } from 'vue';
 import { api } from '@/services/api.js';
 import { useAuthStore } from '@/stores/auth.js';
 import { toast } from '@/composables/useToast.js';
-import AppModal from '@/components/ui/AppModal.vue';
-import AppButton from '@/components/ui/AppButton.vue';
-import AppSelect from '@/components/ui/AppSelect.vue';
-import AppSpinner from '@/components/ui/AppSpinner.vue';
 
 const props = defineProps({
   ticketId: { type: String, required: true }
@@ -45,7 +65,7 @@ const authStore = useAuthStore();
 const loading = ref(true);
 const submitting = ref(false);
 const agents = ref([]);
-const selectedAgent = ref('');
+const selectedAgent = ref(null);
 const reason = ref('');
 
 const agentOptions = computed(() =>
@@ -59,17 +79,12 @@ const agentOptions = computed(() =>
 
 async function loadAgents() {
   try {
-    const res = await api.get('/admin/users', { role: 'AGENT', limit: 100 });
-    agents.value = res.data || [];
+    const res = await api.get('/admin/users', { limit: 100 });
+    agents.value = (res.data || []).filter(u =>
+      (u.role === 'AGENT' || u.role === 'ADMIN') && u.isActive
+    );
   } catch {
-    try {
-      const res = await api.get('/admin/users', { limit: 100 });
-      agents.value = (res.data || []).filter(u =>
-        (u.role === 'AGENT' || u.role === 'ADMIN') && u.id !== authStore.user.id
-      );
-    } catch {
-      agents.value = [];
-    }
+    agents.value = [];
   }
   loading.value = false;
 }

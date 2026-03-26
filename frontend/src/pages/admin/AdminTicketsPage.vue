@@ -65,6 +65,13 @@
                 <v-chip :color="priorityColor(t.priority)" size="small" label variant="outlined">
                   {{ formatPriority(t.priority) }}
                 </v-chip>
+                <v-btn
+                  icon="mdi-delete-outline"
+                  color="error"
+                  variant="text"
+                  size="x-small"
+                  @click.prevent="deleteTicket(t)"
+                />
               </div>
             </template>
           </v-list-item>
@@ -133,6 +140,15 @@ function priorityColor(priority) {
     CRITICAL: 'red'
   };
   return map[priority] || 'grey';
+}
+
+async function deleteTicket(t) {
+  if (!confirm(`Удалить тикет #${t.number} "${t.title}"? Все сообщения и вложения будут удалены безвозвратно.`)) return;
+  try {
+    await api.delete(`/admin/tickets/${t.id}`);
+    toast.success(`Тикет #${t.number} удалён`);
+    await load();
+  } catch (err) { toast.error(err.message); }
 }
 
 async function load() {

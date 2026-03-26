@@ -5,12 +5,34 @@
 import { Router } from 'express';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
+import multer from 'multer';
+import { existsSync, mkdirSync } from 'fs';
+import { resolve, extname } from 'path';
 import { authenticate } from '../middleware/auth.js';
 import { getModels } from '../models/index.js';
 import { sendVerificationCode } from '../services/email.js';
 import { isSmtpConfigured } from '../services/email.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { NotificationType } from '../models/enums.js';
+import { sendToUser } from '../websocket/wsServer.js';
+
+const AVATARS_DIR = resolve(process.cwd(), 'data', 'avatars');
+if (!existsSync(AVATARS_DIR)) mkdirSync(AVATARS_DIR, { recursive: true });
+
+const avatarUpload = multer({
+  storage: multer.diskStorage({
+    destination: AVATARS_DIR,
+    filename: (req, file, cb) => {
+      const ext = extname(file.originalname) || '.jpg';
+      cb(null, `${req.user.sub}${ext}`);
+    }
+  }),
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
+  fileFilter: (req, file, cb) => {
+    if (/^image\/(jpeg|png|gif|webp)$/.test(file.mimetype)) cb(null, true);
+    else cb(new Error('Допустимы только изображения (JPEG, PNG, GIF, WebP)'));
+  }
+});
 
 const router = Router();
 
@@ -22,7 +44,7 @@ const router = Router();
 router.get('/', authenticate, asyncHandler(async (req, res) => {
   const { User } = getModels();
   const user = await User.findByPk(req.user.sub, {
-    attributes: ['id', 'login', 'email', 'displayName', 'role', 'verifiedEmail', 'createdAt']
+    attributes: ['id', 'login', 'email', 'displayName', 'role', 'verifiedEmail', 'avatarPath', 'createdAt']
   });
   if (!user) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Пользователь не найден' } });
   res.json({ data: user.toJSON() });
@@ -41,13 +63,15 @@ router.put('/', authenticate, asyncHandler(async (req, res) => {
   if (email !== undefined) user.email = email;
 
   await user.save();
-  res.json({
-    data: {
-      id: user.id, login: user.login, email: user.email,
-      displayName: user.displayName, role: user.role,
-      verifiedEmail: user.verifiedEmail
-    }
-  });
+  const userData = {
+    id: user.id, login: user.login, email: user.email,
+    displayName: user.displayName, role: user.role,
+    verifiedEmail: user.verifiedEmail, avatarPath: user.avatarPath
+  };
+  res.json({ data: userData });
+
+  // WS: обновить данные во всех открытых вкладках
+  sendToUser(user.id, { type: 'profile_updated', data: userData });
 }));
 
 /**
@@ -264,6 +288,52 @@ router.get('/push-status', authenticate, asyncHandler(async (req, res) => {
  */
 router.get('/smtp-status', authenticate, asyncHandler(async (req, res) => {
   res.json({ data: { configured: isSmtpConfigured() } });
+}));
+
+// ==================== AVATAR ====================
+
+/**
+ * POST /api/profile/avatar — загрузить аватарку
+ */
+router.post('/avatar', authenticate, avatarUpload.single('avatar'), asyncHandler(async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Файл не загружен' } });
+  }
+  const { User } = getModels();
+  const user = await User.findByPk(req.user.sub);
+  user.avatarPath = `/api/profile/avatar/${req.user.sub}`;
+  await user.save();
+  res.json({ data: { avatarUrl: user.avatarPath } });
+  sendToUser(user.id, { type: 'profile_updated' });
+}));
+
+/**
+ * GET /api/profile/avatar/:userId — отдать аватарку
+ */
+router.get('/avatar/:userId', asyncHandler(async (req, res) => {
+  const { readdirSync } = await import('fs');
+  const files = readdirSync(AVATARS_DIR);
+  const match = files.find(f => f.startsWith(req.params.userId));
+  if (!match) {
+    return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Аватарка не найдена' } });
+  }
+  res.sendFile(resolve(AVATARS_DIR, match));
+}));
+
+/**
+ * DELETE /api/profile/avatar — удалить аватарку
+ */
+router.delete('/avatar', authenticate, asyncHandler(async (req, res) => {
+  const { unlinkSync, readdirSync } = await import('fs');
+  const files = readdirSync(AVATARS_DIR);
+  const match = files.find(f => f.startsWith(req.user.sub));
+  if (match) unlinkSync(resolve(AVATARS_DIR, match));
+  const { User } = getModels();
+  const user = await User.findByPk(req.user.sub);
+  user.avatarPath = null;
+  await user.save();
+  res.status(204).send();
+  sendToUser(user.id, { type: 'profile_updated' });
 }));
 
 export default router;

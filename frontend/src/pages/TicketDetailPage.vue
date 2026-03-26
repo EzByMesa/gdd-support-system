@@ -35,6 +35,9 @@
             <span v-if="ticket.assignee" class="text-caption" style="color: rgba(255,255,255,0.25)">
               &rarr; {{ ticket.assignee.displayName }}
             </span>
+            <v-chip v-if="ticket.createdBy" color="purple" size="x-small" label variant="tonal" prepend-icon="mdi-shield-account">
+              Создано: {{ ticket.createdBy.displayName }}
+            </v-chip>
             <v-chip v-if="ticket.readonly" color="grey" size="x-small" label prepend-icon="mdi-lock">
               Закрыто
             </v-chip>
@@ -46,16 +49,16 @@
       <div v-if="!ticket.readonly && (hasActions || canUserClose)" class="mb-3">
         <div class="d-flex flex-wrap" style="gap: 6px">
           <!-- Автор не может взять свой тикет -->
-          <v-chip v-if="isAgentOrAdmin && ticket.status === 'OPEN' && ticket.author?.id === user.id"
+          <v-chip v-if="isStaff && ticket.status === 'OPEN' && ticket.author?.id === user.id"
             color="warning" variant="tonal" size="small" prepend-icon="mdi-information-outline">
             Вы автор — назначить может другой агент
           </v-chip>
-          <v-btn v-else-if="isAgentOrAdmin && ticket.status === 'OPEN'" color="primary" size="small"
+          <v-btn v-else-if="isStaff && ticket.status === 'OPEN'" color="primary" size="small"
             :loading="actionLoading" @click="assignTicket" prepend-icon="mdi-hand-back-right">
             Взять в работу
           </v-btn>
 
-          <template v-if="isAgentOrAdmin && ticket.assignee?.id === user.id">
+          <template v-if="isStaff && (ticket.assignee?.id === user.id || user.role === 'SENIOR_AGENT' || user.role === 'ADMIN')">
             <v-btn v-for="s in statusButtons" :key="s.value" size="small"
               :color="ticket.status === s.value ? s.color : undefined"
               :variant="ticket.status === s.value ? 'flat' : 'outlined'"
@@ -72,7 +75,16 @@
             prepend-icon="mdi-close-circle-outline" @click="showCloseModal = true">
             Закрыть
           </v-btn>
+
         </div>
+      </div>
+
+      <!-- Knowledge button for closed tickets (outside readonly guard) -->
+      <div v-if="authStore.knowledgeEnabled && isStaff && ticket.readonly && (ticket.status === 'CLOSED' || ticket.status === 'RESOLVED')" class="mb-3">
+        <v-btn size="small" variant="tonal" color="info" prepend-icon="mdi-book-plus"
+          :loading="convertingToKb" @click="convertToKnowledge">
+          Добавить в базу знаний
+        </v-btn>
       </div>
 
       <!-- Main content -->
@@ -86,7 +98,7 @@
               <template v-if="ticket.attachments?.length">
                 <v-divider class="my-2" />
                 <div v-for="att in ticket.attachments" :key="att.id">
-                  <a :href="`/api/attachments/${att.id}/download`" target="_blank"
+                  <a :href="`${config.apiUrl}/attachments/${att.id}/download`" target="_blank"
                     class="d-flex align-center text-decoration-none text-primary" style="gap: 4px; font-size: 0.8rem">
                     <v-icon size="14">mdi-paperclip</v-icon>
                     {{ att.originalName }} ({{ formatFileSize(att.size) }})
@@ -98,7 +110,9 @@
 
           <!-- Chat -->
           <div class="text-caption font-weight-bold mb-1" style="color: rgba(255,255,255,0.35)">Чат</div>
-          <ChatWindow :ticket-id="ticketId" :current-user-id="user.id" :readonly="!canChat || ticket.readonly" />
+          <ChatWindow v-if="canViewChat" :ticket-id="ticketId" :current-user-id="user.id"
+            :readonly="!canChat || ticket.readonly"
+            @ticket-updated="loadTicket" />
         </v-col>
 
         <!-- Sidebar: details (on mobile appears second, below actions but above chat would be confusing, so after) -->
@@ -171,6 +185,7 @@ import { formatDateTime, formatStatus, formatPriority, formatFileSize } from '@/
 import MainLayout from '@/components/layout/MainLayout.vue';
 import ChatWindow from '@/components/chat/ChatWindow.vue';
 import DelegateModal from '@/components/tickets/DelegateModal.vue';
+import config from '@/config.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -186,18 +201,27 @@ const showCloseModal = ref(false);
 const customFieldDefs = ref([]);
 const closeReason = ref('');
 const closeLoading = ref(false);
+const convertingToKb = ref(false);
 
 const user = computed(() => authStore.user);
 
 const statusColorMap = { OPEN: 'info', IN_PROGRESS: 'warning', WAITING_FOR_USER: 'orange', RESOLVED: 'success', CLOSED: 'grey' };
 const priorityColorMap = { LOW: 'grey', MEDIUM: 'info', HIGH: 'warning', CRITICAL: 'error' };
 
-const isAgentOrAdmin = computed(() => user.value?.role === 'AGENT' || user.value?.role === 'ADMIN');
+const isStaff = computed(() => ['AGENT', 'SENIOR_AGENT', 'ADMIN'].includes(user.value?.role));
 
+// Может читать чат
+const canViewChat = computed(() => {
+  if (!ticket.value || !user.value) return false;
+  if (isStaff.value) return true;
+  return user.value.role === 'USER' && ticket.value.author?.id === user.value.id;
+});
+
+// Может писать в чат
 const canChat = computed(() => {
   if (!ticket.value || !user.value) return false;
   const t = ticket.value;
-  return user.value.role === 'ADMIN'
+  return user.value.role === 'ADMIN' || user.value.role === 'SENIOR_AGENT'
     || (user.value.role === 'USER' && t.author?.id === user.value.id)
     || (user.value.role === 'AGENT' && t.assignee?.id === user.value.id);
 });
@@ -210,7 +234,7 @@ const canUserClose = computed(() => {
 const hasActions = computed(() => {
   if (!ticket.value || !user.value) return false;
   const t = ticket.value;
-  return (isAgentOrAdmin.value && t.status === 'OPEN') || (isAgentOrAdmin.value && t.assignee?.id === user.value.id);
+  return (isStaff.value && t.status === 'OPEN') || (isStaff.value && t.assignee?.id === user.value.id);
 });
 
 const statusButtons = [
@@ -221,13 +245,14 @@ const statusButtons = [
 ];
 
 async function loadTicket() {
-  loading.value = true;
+  const isFirstLoad = !ticket.value;
+  if (isFirstLoad) loading.value = true;
   error.value = '';
   try {
     const res = await api.get(`/tickets/${ticketId}`);
     ticket.value = res.data;
   } catch (err) { error.value = err.message; }
-  loading.value = false;
+  if (isFirstLoad) loading.value = false;
 }
 
 async function assignTicket() {
@@ -235,7 +260,7 @@ async function assignTicket() {
   try {
     const res = await api.put(`/tickets/${ticketId}/assign`);
     ticket.value = res.data;
-    toast.success(`Взято в работу! Псевдоним: ${res.data.agentAlias}`);
+    toast.success('Тикет взят в работу!');
   } catch (err) { toast.error(err.message); }
   actionLoading.value = false;
 }
@@ -258,6 +283,16 @@ async function handleCloseTicket() {
     toast.success('Обращение закрыто');
   } catch (err) { toast.error(err.message); }
   closeLoading.value = false;
+}
+
+async function convertToKnowledge() {
+  convertingToKb.value = true;
+  try {
+    const res = await api.post(`/knowledge/from-ticket/${ticketId}`);
+    toast.success('Черновик создан — отредактируйте и опубликуйте');
+    router.push(`/admin/knowledge?edit=${res.data.id}`);
+  } catch (err) { toast.error(err.message); }
+  convertingToKb.value = false;
 }
 
 async function loadCustomFields() {

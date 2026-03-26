@@ -15,6 +15,26 @@
       <v-tabs-window-item value="profile">
         <v-row>
           <v-col cols="12" md="6">
+            <!-- Avatar card -->
+            <v-card class="mb-4">
+              <v-card-text class="d-flex align-center" style="gap: 16px">
+                <RoleAvatar :size="64" :name="profile.displayName" :role="profile.role"
+                  :src="avatarUrl" />
+                <div>
+                  <v-btn size="small" color="primary" variant="outlined" prepend-icon="mdi-camera"
+                    @click="$refs.avatarInput.click()" :loading="uploadingAvatar">
+                    Загрузить фото
+                  </v-btn>
+                  <v-btn v-if="avatarUrl" size="small" variant="text" color="error" class="ml-2"
+                    @click="deleteAvatar">
+                    Удалить
+                  </v-btn>
+                  <input ref="avatarInput" type="file" accept="image/*" hidden @change="uploadAvatar" />
+                  <div class="text-caption text-medium-emphasis mt-1">JPEG, PNG, WebP. Макс. 2 МБ</div>
+                </div>
+              </v-card-text>
+            </v-card>
+
             <v-card>
               <v-card-title>Профиль</v-card-title>
               <v-card-text>
@@ -216,6 +236,7 @@ import { api } from '@/services/api.js';
 import { toast } from '@/composables/useToast.js';
 import { pushService } from '@/services/push.js';
 import MainLayout from '@/components/layout/MainLayout.vue';
+import RoleAvatar from '@/components/ui/RoleAvatar.vue';
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -227,6 +248,8 @@ const profile = reactive({
   login: '', displayName: '', email: '', role: '', verifiedEmail: null
 });
 const savingProfile = ref(false);
+const uploadingAvatar = ref(false);
+const avatarUrl = ref(null);
 
 // Password
 const passwords = reactive({ current: '', new: '', confirm: '' });
@@ -259,6 +282,30 @@ async function loadProfile() {
   try {
     const res = await api.get('/profile');
     Object.assign(profile, res.data);
+    avatarUrl.value = res.data.avatarPath || null;
+  } catch (err) { toast.error(err.message); }
+}
+
+async function uploadAvatar(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  uploadingAvatar.value = true;
+  try {
+    const fd = new FormData();
+    fd.append('avatar', file);
+    const res = await api.upload('/profile/avatar', fd);
+    avatarUrl.value = res.data.avatarUrl + '?t=' + Date.now();
+    toast.success('Аватарка обновлена');
+  } catch (err) { toast.error(err.message); }
+  uploadingAvatar.value = false;
+  event.target.value = '';
+}
+
+async function deleteAvatar() {
+  try {
+    await api.delete('/profile/avatar');
+    avatarUrl.value = null;
+    toast.success('Аватарка удалена');
   } catch (err) { toast.error(err.message); }
 }
 

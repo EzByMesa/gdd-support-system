@@ -1,4 +1,5 @@
 import { api } from './api.js';
+import config from '@/config.js';
 
 /**
  * WebSocket клиент с автоматическим переподключением.
@@ -20,9 +21,7 @@ export class WsClient {
     const token = api.accessToken;
     if (!token) return;
 
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    let url = `${proto}//${host}/ws?token=${token}`;
+    let url = `${config.wsUrl}?token=${token}`;
     if (this.opts.ticketId) {
       url += `&ticketId=${this.opts.ticketId}`;
     }
@@ -69,6 +68,18 @@ export class WsClient {
         break;
       case 'agent_changed':
         if (this.opts.onAgentChanged) this.opts.onAgentChanged(msg.data);
+        break;
+      case 'ticket_updated':
+        if (this.opts.onTicketUpdated) this.opts.onTicketUpdated(msg.data);
+        break;
+      case 'tickets_updated':
+        if (this.opts.onTicketsUpdated) this.opts.onTicketsUpdated();
+        break;
+      case 'profile_updated':
+        if (this.opts.onProfileUpdated) this.opts.onProfileUpdated(msg.data);
+        break;
+      case 'force_logout':
+        if (this.opts.onForceLogout) this.opts.onForceLogout();
         break;
       case 'notification':
         if (this.opts.onNotification) this.opts.onNotification(msg.data);

@@ -7,10 +7,10 @@ import {
 
 const router = Router();
 
-router.get('/incoming', authenticate, authorize('AGENT', 'ADMIN'), listIncoming);
-router.get('/incoming/count', authenticate, authorize('AGENT', 'ADMIN'), countIncoming);
-router.get('/outgoing', authenticate, authorize('AGENT', 'ADMIN'), listOutgoing);
-router.put('/:id/respond', authenticate, authorize('AGENT', 'ADMIN'), respondDelegation);
+router.get('/incoming', authenticate, authorize('AGENT', 'SENIOR_AGENT', 'ADMIN'), listIncoming);
+router.get('/incoming/count', authenticate, authorize('AGENT', 'SENIOR_AGENT', 'ADMIN'), countIncoming);
+router.get('/outgoing', authenticate, authorize('AGENT', 'SENIOR_AGENT', 'ADMIN'), listOutgoing);
+router.put('/:id/respond', authenticate, authorize('AGENT', 'SENIOR_AGENT', 'ADMIN'), respondDelegation);
 
 export default router;
 

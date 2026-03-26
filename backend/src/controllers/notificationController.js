@@ -63,6 +63,28 @@ export async function markAllRead(req, res) {
 }
 
 /**
+ * DELETE /api/notifications/:id
+ */
+export async function deleteNotification(req, res) {
+  const { Notification } = getModels();
+  const notif = await Notification.findOne({
+    where: { id: req.params.id, userId: req.user.sub }
+  });
+  if (!notif) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Уведомление не найдено' } });
+  await notif.destroy();
+  res.status(204).send();
+}
+
+/**
+ * DELETE /api/notifications/all
+ */
+export async function deleteAllNotifications(req, res) {
+  const { Notification } = getModels();
+  await Notification.destroy({ where: { userId: req.user.sub } });
+  res.status(204).send();
+}
+
+/**
  * GET /api/push/vapid-key
  */
 export async function vapidKey(req, res) {

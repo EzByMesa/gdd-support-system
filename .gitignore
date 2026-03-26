@@ -10,3 +10,11 @@ backend/data/
 
 # SSL cert for dev
 frontend/.cert/
+
+# ML models (download at first run, ~600MB+)
+.cache/
+models/
+*.onnx
+
+# Claude Code local settings
+.claude/
